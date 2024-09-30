@@ -11,6 +11,7 @@ impl Client {
 
         let raw_response = ureq::post(&endpoint)
             .set("Content-Type", "application/json")
+            .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9163 Chrome/124.0.6367.243 Electron/30.2.0 Safari/537.36")
             .send_json(post_body)
             .unwrap();
 
@@ -68,6 +69,7 @@ impl Client {
         let raw_response = ureq::get(&endpoint)
             .set("Content-Type", "application/json")
             .set("Authorization", &token.into())
+            .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9163 Chrome/124.0.6367.243 Electron/30.2.0 Safari/537.36")
             .call()
             .unwrap();
         // println!("{:?}", raw_response);
@@ -115,15 +117,15 @@ pub struct Message {
     pub content: String,
     mentions: Vec<String>,
     mention_roles: Vec<String>,
-    attachments: Vec<String>,
+    // attachments: Vec<String>,
     // embeds: Vec<String>,
-    timestamp: String,
-    edited_timestamp: Option<String>,
-    flags: usize,
-    components: Vec<String>,
-    id: String,
-    channel_id: String,
-    author: User,
+    // timestamp: String,
+    // edited_timestamp: Option<String>,
+    // flags: usize,
+    // components: Vec<String>,
+    // id: String,
+    // channel_id: String,
+    pub author: User,
     pinned: bool,
     mention_everyone: bool,
     tts: bool,

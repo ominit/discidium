@@ -2,17 +2,17 @@ use std::{collections::HashMap, thread, time::Duration};
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 use eframe::{
-    egui::{FontFamily, FontId, TextEdit, TextStyle},
+    egui::{FontFamily, FontId, Layout, ScrollArea, TextEdit, TextStyle},
     App,
 };
 use ratelimit::Ratelimiter;
 
-use crate::api::user::{Client, DMChat};
+use crate::api::user::{Client, DMChat, Message};
 
 pub fn create_ui() {
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
-        "rust discord",
+        "discidium",
         native_options,
         Box::new(|cc| Ok(Box::new(Data::new(cc)))),
     )
@@ -23,15 +23,18 @@ struct Data {
     token: Option<String>,
     cur_guild_id: Option<String>,
     cur_channel_id: Option<String>,
-    sender: Sender<Message>,
-    receiver: Receiver<Message>,
+    sender: Sender<SendMessage>,
+    receiver: Receiver<SendMessage>,
     ratelimit: Ratelimiter,
     text_edit: HashMap<String, String>,
+    dm_channels: HashMap<String, DMChat>,
+    channel_messages: HashMap<String, Vec<Message>>,
 }
 
-enum Message {
+enum SendMessage {
     GetDms(Vec<DMChat>),
     GetToken(String),
+    GetMessages(Vec<Message>, String),
 }
 
 impl Data {
@@ -51,17 +54,31 @@ impl Data {
         .into();
 
         cc.egui_ctx.set_style(style);
+
         let (sender, receiver) = bounded(1);
+
+        let ratelimit = Ratelimiter::builder(1, Duration::from_secs(5))
+            .max_tokens(5)
+            .initial_available(5)
+            .build()
+            .unwrap();
+
         let token;
         if let Some(storage) = cc.storage {
             token = eframe::get_value::<Option<String>>(storage, eframe::APP_KEY).unwrap_or(None);
+            // token = None;
+            if token.is_some() {
+                let token_clone: String = token.clone().unwrap();
+                run_async(
+                    move || SendMessage::GetDms(Client::get_dms(token_clone.clone())),
+                    &ratelimit,
+                    sender.clone(),
+                );
+            }
         } else {
             token = None;
         }
 
-        let ratelimit = Ratelimiter::builder(1, Duration::from_secs(5))
-            .build()
-            .unwrap();
         Self {
             ratelimit,
             sender,
@@ -70,6 +87,8 @@ impl Data {
             cur_guild_id: None,
             cur_channel_id: None,
             text_edit: HashMap::new(),
+            dm_channels: HashMap::new(),
+            channel_messages: HashMap::new(),
         }
     }
 }
@@ -87,9 +106,9 @@ impl App for Data {
 }
 
 fn run_async(
-    message: impl Fn() -> Message + Send + 'static,
+    message: impl Fn() -> SendMessage + Send + 'static,
     ratelimit: &Ratelimiter,
-    sender: Sender<Message>,
+    sender: Sender<SendMessage>,
 ) {
     if ratelimit.try_wait().is_ok() {
         thread::spawn(move || {
@@ -108,50 +127,134 @@ fn ui(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
 
 fn central_panel(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
     eframe::egui::CentralPanel::default().show(ctx, |ui| {
-        ui.label("hello");
-        ui.label("world");
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label("home");
+                ui.label("servers");
+            });
+            ui.separator();
+            if data.cur_guild_id.is_some() {
+                ui.vertical(|ui| {
+                    ui.label("channels");
+                    ui.label("servers");
+                });
+            } else {
+                ui.vertical(|ui| {
+                    for dm in &data.dm_channels {
+                        if ui.button(dm.1.get_dm_name().clone()).clicked() {
+                            let channel_id = dm.0.clone();
+                            let _ = data.cur_channel_id.insert(channel_id.clone());
+                            let sender = data.sender.clone();
+                            let ratelimit = &data.ratelimit;
+                            let token = data.token.clone().unwrap();
+                            run_async(
+                                move || {
+                                    SendMessage::GetMessages(
+                                        Client::get_messages(token.clone(), channel_id.clone()),
+                                        channel_id.clone(),
+                                    )
+                                },
+                                ratelimit,
+                                sender.clone(),
+                            )
+                        }
+                    }
+                });
+            }
+            ui.separator();
+            if data.cur_channel_id.is_some() {
+                ui.vertical(|ui| {
+                    let channel = data
+                        .dm_channels
+                        .get(&data.cur_channel_id.clone().unwrap())
+                        .unwrap();
+                    ui.label(channel.get_dm_name());
+                    ui.separator();
+                    if let Some(messages) = data.channel_messages.get(&channel.id) {
+                        ScrollArea::vertical()
+                            .auto_shrink([false; 2])
+                            .show(ui, |ui| {
+                                for m in messages {
+                                    ui.label(m.author.username.clone() + ": " + &m.content.clone());
+                                }
+                            });
+                        let mut a = "message";
+                        ui.text_edit_singleline(&mut a);
+                    } else {
+                        ui.label("loading");
+                    }
+                });
+            } else {
+                ui.vertical(|ui| {
+                    ui.label("friends");
+                    ui.label("todo");
+                });
+            }
+        });
     });
 }
 
 fn login_ui(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
     eframe::egui::CentralPanel::default().show(ctx, |ui| {
         ui.label("login");
-        ui.horizontal(|ui| {
-            ui.label("email");
-            let mut text = data.text_edit.remove("login_email").unwrap_or_default();
+        // ui.horizontal(|ui| {
+        //     ui.label("email");
+        //     let mut text = data.text_edit.remove("login_email").unwrap_or_default();
 
-            ui.text_edit_singleline(&mut text);
-            data.text_edit.insert("login_email".to_string(), text);
-        });
+        //     ui.text_edit_singleline(&mut text);
+        //     data.text_edit.insert("login_email".to_string(), text);
+        // });
+        // ui.horizontal(|ui| {
+        //     ui.label("password");
+        //     let mut text = data.text_edit.remove("login_password").unwrap_or_default();
+
+        //     ui.add(TextEdit::singleline(&mut text).password(true));
+        //     data.text_edit.insert("login_password".to_string(), text);
+        // });
+        // if data.text_edit.contains_key("login_password")
+        //     && data.text_edit.contains_key("login_email")
+        //     && ui.button("submit").clicked()
+        // {
+        //     let email = data.text_edit.remove("login_email").unwrap();
+        //     let password = data.text_edit.remove("login_password").unwrap();
+        //     let sender = data.sender.clone();
+        //     let ratelimit = &data.ratelimit;
+        //     run_async(
+        //         move || Message::GetToken(Client::login_user(email.clone(), password.clone())),
+        //         ratelimit,
+        //         sender,
+        //     );
+        // }
         ui.horizontal(|ui| {
-            ui.label("password");
-            let mut text = data.text_edit.remove("login_password").unwrap_or_default();
+            ui.label("token");
+            let mut text = data.text_edit.remove("login_token").unwrap_or_default();
 
             ui.add(TextEdit::singleline(&mut text).password(true));
-            data.text_edit.insert("login_password".to_string(), text);
+            data.text_edit.insert("login_token".to_string(), text);
         });
-        if data.text_edit.contains_key("login_password")
-            && data.text_edit.contains_key("login_email")
-            && ui.button("submit").clicked()
-        {
-            let email = data.text_edit.remove("login_email").unwrap();
-            let password = data.text_edit.remove("login_password").unwrap();
-            let sender = data.sender.clone();
-            let ratelimit = &data.ratelimit;
-            run_async(
-                move || Message::GetToken(Client::login_user(email.clone(), password.clone())),
-                ratelimit,
-                sender,
-            );
+        if data.text_edit.contains_key("login_token") && ui.button("submit").clicked() {
+            let _ = data
+                .token
+                .insert(data.text_edit.remove("login_token").unwrap());
         }
     });
 }
 
 fn collect_message(data: &mut Data) {
     match data.receiver.try_recv() {
-        Ok(Message::GetToken(token)) => {
+        Ok(SendMessage::GetToken(token)) => {
             println!("token acquired");
             let _ = data.token.insert(token);
+        }
+        Ok(SendMessage::GetDms(dms)) => {
+            println!("dms acquired");
+            for dm in dms {
+                data.dm_channels.insert(dm.id.clone(), dm);
+            }
+        }
+        Ok(SendMessage::GetMessages(messages, channel_id)) => {
+            println!("messages acquired");
+            data.channel_messages.insert(channel_id, messages);
         }
         _ => {}
     }
