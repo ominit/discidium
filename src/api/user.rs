@@ -29,7 +29,7 @@ impl Client {
         channel_id: impl Into<String>,
         text: impl Into<String>,
         token: impl Into<String>,
-    ) -> usize {
+    ) {
         let endpoint = format!(
             "https://discord.com/api/v9/channels/{}/messages",
             channel_id.into()
@@ -47,7 +47,6 @@ impl Client {
             .unwrap();
         println!("{:?}", raw_response);
         println!("{:?}", raw_response.into_string().unwrap());
-        0 // in order to send the message
     }
 
     pub fn get_guilds(token: impl Into<String>) -> Vec<Guild> {
@@ -121,8 +120,8 @@ pub struct Message {
     #[serde(rename = "type")]
     message_type: usize,
     pub content: String,
-    mentions: Vec<String>,
-    mention_roles: Vec<String>,
+    // mentions: Vec<String>,
+    // mention_roles: Vec<String>,
     // attachments: Vec<String>,
     // embeds: Vec<String>,
     // timestamp: String,
@@ -157,7 +156,7 @@ pub struct DMChat {
     pub name: Option<String>,
     #[serde(rename = "type")]
     dm_type: usize,
-    pub last_message_id: String,
+    // pub last_message_id: String,
     pub flags: usize,
 }
 
@@ -213,16 +212,16 @@ pub struct Connection {
 #[derive(Debug, serde::Deserialize)]
 pub struct User {
     pub id: String,
-    pub avatar: String,
+    // pub avatar: String,
     pub username: String,
-    pub global_name: Option<String>,
-    pub avatar_decoration_data: Option<String>,
-    pub discriminator: String,
+    // pub global_name: Option<String>,
+    // pub avatar_decoration_data: Option<String>,
+    // pub discriminator: String,
     pub public_flags: usize,
-    pub clan: Option<String>,
+    // pub clan: Option<String>,
     pub flags: Option<usize>,
-    pub banner: Option<String>,
-    pub banner_color: Option<String>,
+    // pub banner: Option<String>,
+    // pub banner_color: Option<String>,
     pub accent_color: Option<usize>,
-    pub bio: Option<String>,
+    // pub bio: Option<String>,
 }

@@ -2,7 +2,7 @@ use std::{collections::HashMap, thread, time::Duration};
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 use eframe::{
-    egui::{FontFamily, FontId, Layout, ScrollArea, TextEdit, TextStyle},
+    egui::{FontFamily, FontId, Layout, ScrollArea, TextEdit, TextStyle, Ui},
     App,
 };
 use ratelimit::Ratelimiter;
@@ -35,7 +35,7 @@ enum SendMessage {
     GetDms(Vec<DMChat>),
     GetToken(String),
     GetMessages(Vec<Message>, String),
-    SendMessage(usize),
+    SendMessage(()),
 }
 
 impl Data {
@@ -129,81 +129,19 @@ fn ui(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
 fn central_panel(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
     eframe::egui::CentralPanel::default().show(ctx, |ui| {
         ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label("home");
-                ui.label("servers");
-            });
+            servers_ui(data, ui);
             ui.separator();
             if data.cur_guild_id.is_some() {
                 ui.vertical(|ui| {
                     ui.label("channels");
-                    ui.label("servers");
+                    ui.label("todo");
                 });
             } else {
-                ui.vertical(|ui| {
-                    for dm in &data.dm_channels {
-                        if ui.button(dm.1.get_dm_name().clone()).clicked() {
-                            let channel_id = dm.0.clone();
-                            let _ = data.cur_channel_id.insert(channel_id.clone());
-                            let sender = data.sender.clone();
-                            let ratelimit = &data.ratelimit;
-                            let token = data.token.clone().unwrap();
-                            run_async(
-                                move || {
-                                    SendMessage::GetMessages(
-                                        Client::get_messages(token.clone(), channel_id.clone()),
-                                        channel_id.clone(),
-                                    )
-                                },
-                                ratelimit,
-                                sender.clone(),
-                            )
-                        }
-                    }
-                });
+                dm_channels_ui(data, ui);
             }
             ui.separator();
             if data.cur_channel_id.is_some() {
-                ui.vertical(|ui| {
-                    let channel = data
-                        .dm_channels
-                        .get(&data.cur_channel_id.clone().unwrap())
-                        .unwrap();
-                    ui.label(channel.get_dm_name());
-                    ui.separator();
-                    if let Some(messages) = data.channel_messages.get(&channel.id) {
-                        ScrollArea::vertical()
-                            .auto_shrink([false; 2])
-                            .show(ui, |ui| {
-                                for m in messages {
-                                    ui.label(m.author.username.clone() + ": " + &m.content.clone());
-                                }
-                            });
-                        let mut send_message =
-                            data.text_edit.remove("send_message").unwrap_or_default();
-                        let message_edit = ui.text_edit_singleline(&mut send_message);
-                        data.text_edit
-                            .insert("send_message".to_string(), send_message);
-                        if ui.button("send").clicked() {
-                            let token = data.token.clone().unwrap();
-                            let channel_id = data.cur_channel_id.clone().unwrap();
-                            let message = data.text_edit.remove("send_message").unwrap_or_default();
-                            run_async(
-                                move || {
-                                    SendMessage::SendMessage(Client::send_message(
-                                        channel_id.clone(),
-                                        message.clone(),
-                                        token.clone(),
-                                    ))
-                                },
-                                &data.ratelimit,
-                                data.sender.clone(),
-                            )
-                        }
-                    } else {
-                        ui.label("loading");
-                    }
-                });
+                messages_ui(data, ui);
             } else {
                 ui.vertical(|ui| {
                     ui.label("friends");
@@ -211,6 +149,89 @@ fn central_panel(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut efram
                 });
             }
         });
+    });
+}
+
+fn servers_ui(data: &mut Data, ui: &mut Ui) {
+    ui.vertical(|ui| {
+        if ui.button("home").clicked() {
+            data.cur_guild_id = None;
+            data.cur_channel_id = None;
+        }
+        ui.label("servers");
+    });
+}
+
+fn messages_ui(data: &mut Data, ui: &mut Ui) {
+    ui.vertical(|ui| {
+        let channel = data
+            .dm_channels
+            .get(&data.cur_channel_id.clone().unwrap())
+            .unwrap();
+        ui.label(channel.get_dm_name());
+        ui.separator();
+        if let Some(messages) = data.channel_messages.get(&channel.id) {
+            ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for m in messages {
+                        ui.label(m.author.username.clone() + ": " + &m.content.clone());
+                    }
+                });
+            let mut send_message = data.text_edit.remove("send_message").unwrap_or_default();
+            ui.text_edit_singleline(&mut send_message);
+            data.text_edit
+                .insert("send_message".to_string(), send_message);
+            if ui.button("send").clicked() {
+                let token = data.token.clone().unwrap();
+                let channel_id = data.cur_channel_id.clone().unwrap();
+                let message = data.text_edit.remove("send_message").unwrap_or_default();
+                run_async(
+                    move || {
+                        SendMessage::SendMessage(Client::send_message(
+                            channel_id.clone(),
+                            message.clone(),
+                            token.clone(),
+                        ))
+                    },
+                    &data.ratelimit,
+                    data.sender.clone(),
+                )
+            }
+        } else {
+            ui.label("loading");
+        }
+    });
+}
+
+fn dm_channels_ui(data: &mut Data, ui: &mut Ui) {
+    ui.vertical(|ui| {
+        ScrollArea::vertical()
+            .id_salt("dm_channels_ui")
+            .max_width(200.)
+            .auto_shrink([false, false])
+            .max_height(f32::INFINITY)
+            .show(ui, |ui| {
+                for dm in &data.dm_channels {
+                    if ui.button(dm.1.get_dm_name().clone()).clicked() {
+                        let channel_id = dm.0.clone();
+                        let _ = data.cur_channel_id.insert(channel_id.clone());
+                        let sender = data.sender.clone();
+                        let ratelimit = &data.ratelimit;
+                        let token = data.token.clone().unwrap();
+                        run_async(
+                            move || {
+                                SendMessage::GetMessages(
+                                    Client::get_messages(token.clone(), channel_id.clone()),
+                                    channel_id.clone(),
+                                )
+                            },
+                            ratelimit,
+                            sender.clone(),
+                        )
+                    }
+                }
+            });
     });
 }
 
