@@ -29,7 +29,7 @@ impl Client {
         channel_id: impl Into<String>,
         text: impl Into<String>,
         token: impl Into<String>,
-    ) {
+    ) -> usize {
         let endpoint = format!(
             "https://discord.com/api/v9/channels/{}/messages",
             channel_id.into()
@@ -47,6 +47,7 @@ impl Client {
             .unwrap();
         println!("{:?}", raw_response);
         println!("{:?}", raw_response.into_string().unwrap());
+        0 // in order to send the message
     }
 
     pub fn get_guilds(token: impl Into<String>) -> Vec<Guild> {
@@ -106,7 +107,12 @@ impl Client {
         // println!("{:?}", raw_response);
         // println!("{:?}", raw_response.into_string().unwrap().clone());
         // vec![]
-        ureq::serde_json::from_str::<Vec<Message>>(&raw_response.into_string().unwrap()).unwrap()
+        let mut messages =
+            ureq::serde_json::from_str::<Vec<Message>>(&raw_response.into_string().unwrap())
+                .unwrap();
+
+        messages.reverse();
+        messages
     }
 }
 

@@ -35,6 +35,7 @@ enum SendMessage {
     GetDms(Vec<DMChat>),
     GetToken(String),
     GetMessages(Vec<Message>, String),
+    SendMessage(usize),
 }
 
 impl Data {
@@ -178,8 +179,27 @@ fn central_panel(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut efram
                                     ui.label(m.author.username.clone() + ": " + &m.content.clone());
                                 }
                             });
-                        let mut a = "message";
-                        ui.text_edit_singleline(&mut a);
+                        let mut send_message =
+                            data.text_edit.remove("send_message").unwrap_or_default();
+                        let message_edit = ui.text_edit_singleline(&mut send_message);
+                        data.text_edit
+                            .insert("send_message".to_string(), send_message);
+                        if ui.button("send").clicked() {
+                            let token = data.token.clone().unwrap();
+                            let channel_id = data.cur_channel_id.clone().unwrap();
+                            let message = data.text_edit.remove("send_message").unwrap_or_default();
+                            run_async(
+                                move || {
+                                    SendMessage::SendMessage(Client::send_message(
+                                        channel_id.clone(),
+                                        message.clone(),
+                                        token.clone(),
+                                    ))
+                                },
+                                &data.ratelimit,
+                                data.sender.clone(),
+                            )
+                        }
                     } else {
                         ui.label("loading");
                     }
@@ -253,6 +273,7 @@ fn collect_message(data: &mut Data) {
             }
         }
         Ok(SendMessage::GetMessages(messages, channel_id)) => {
+            // TODO get messages and sort by timestamp (be able to load more messages)
             println!("messages acquired");
             data.channel_messages.insert(channel_id, messages);
         }
