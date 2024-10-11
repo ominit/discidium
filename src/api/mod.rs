@@ -6,4 +6,5 @@ pub mod state;
 pub mod user;
 
 const ENDPOINT_URL: &str = "https://discord.com/api/v9/";
+const CDN_URL: &str = "https://cdn.discordapp.com/";
 const USER_AGENT: &str = "discidium";

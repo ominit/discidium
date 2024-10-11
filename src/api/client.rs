@@ -3,7 +3,7 @@ use ureq::Response;
 
 use crate::api::USER_AGENT;
 
-use super::{connection::Connection, ratelimit::RateLimits, ENDPOINT_URL};
+use super::{connection::Connection, model::ReadyEvent, ratelimit::RateLimits, ENDPOINT_URL};
 
 pub struct Client {
     ratelimits: RateLimits,
@@ -18,7 +18,7 @@ impl Client {
         }
     }
 
-    pub fn connect(&self) -> Result<Connection> {
+    pub fn connect(&self) -> Result<(Connection, ReadyEvent)> {
         let url = self.get_gateway_url()?;
         Connection::new(&url, &self.token)
     }

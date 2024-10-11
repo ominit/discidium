@@ -9,7 +9,7 @@ use tungstenite::{stream::MaybeTlsStream, WebSocket};
 
 use crate::api::model::{receive_json, Event, GatewayEvent};
 
-use super::model::UserId;
+use super::model::{ReadyEvent, UserId};
 
 pub struct Connection {
     keepalive_channel: crossbeam_channel::Sender<Status>,
@@ -24,7 +24,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(url: &str, token: &str) -> Result<Self> {
+    pub fn new(url: &str, token: &str) -> Result<(Self, ReadyEvent)> {
         let d = ureq::json!({
             "token": token,
             "properties": {
@@ -78,16 +78,19 @@ impl Connection {
 
         let session_id = ready.session_id.clone();
 
-        Ok(Self {
-            keepalive_channel: sender,
-            websocket,
-            token: token.to_string(),
-            session_id: Some(session_id),
-            last_sequence: sequence,
-            identify,
-            user_id: UserId(0), // ready.user.id,
-            ws_url: url.to_string(),
-        })
+        Ok((
+            Self {
+                keepalive_channel: sender,
+                websocket,
+                token: token.to_string(),
+                session_id: Some(session_id),
+                last_sequence: sequence,
+                identify,
+                user_id: UserId(0), // ready.user.id,
+                ws_url: url.to_string(),
+            },
+            ready,
+        ))
     }
 }
 

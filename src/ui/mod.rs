@@ -1,126 +1,75 @@
-// use std::{collections::HashMap, sync::Arc, thread, time::Duration};
+use std::{collections::HashMap, sync::Arc, thread, time::Duration};
 
-// use crossbeam_channel::{bounded, Receiver, Sender};
-// use eframe::{
-//     egui::{FontFamily, FontId, Layout, ScrollArea, TextEdit, TextStyle, Ui},
-//     App,
-// };
-// use ratelimit::Ratelimiter;
+use anyhow::Result;
+use crossbeam_channel::{bounded, Receiver, Sender};
+use eframe::{
+    egui::{FontFamily, FontId, Layout, ScrollArea, TextEdit, TextStyle, Ui},
+    App,
+};
 
-// use crate::api::user::{Client, DMChat, Message};
+use crate::api::{client::Client, state::State};
 
-// pub fn create_ui() {
-//     let native_options = eframe::NativeOptions::default();
-//     eframe::run_native(
-//         "discidium",
-//         native_options,
-//         Box::new(|cc| Ok(Box::new(Data::new(cc)))),
-//     )
-//     .unwrap();
-// }
+pub fn create_ui() -> Result<()> {
+    let native_options = eframe::NativeOptions::default();
+    eframe::run_native(
+        "discidium",
+        native_options,
+        Box::new(|cc| Ok(Box::new(Data::new(cc)?))),
+    )
+    .unwrap();
+    Ok(())
+}
 
-// struct Data {
-//     token: Option<String>,
-//     cur_guild_id: Option<String>,
-//     cur_channel_id: Option<String>,
-//     sender: Sender<SendMessage>,
-//     receiver: Receiver<SendMessage>,
-//     ratelimit: Arc<Ratelimiter>,
-//     text_edit: HashMap<String, String>,
-//     dm_channels: HashMap<String, DMChat>,
-//     channel_messages: HashMap<String, Vec<Message>>,
-// }
+struct Data {}
 
-// enum SendMessage {
-//     GetDms(Vec<DMChat>),
-//     GetToken(String),
-//     GetMessages(Vec<Message>, String),
-//     SendMessage(()),
-// }
+impl Data {
+    fn new(cc: &eframe::CreationContext<'_>) -> Result<Self> {
+        let mut style = (*cc.egui_ctx.style()).clone();
+        style.text_styles = [
+            (TextStyle::Body, FontId::new(23.0, FontFamily::Proportional)),
+            (
+                TextStyle::Heading,
+                FontId::new(23.0, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Button,
+                FontId::new(23.0, FontFamily::Proportional),
+            ),
+        ]
+        .into();
 
-// impl Data {
-//     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-//         let mut style = (*cc.egui_ctx.style()).clone();
-//         style.text_styles = [
-//             (TextStyle::Body, FontId::new(23.0, FontFamily::Proportional)),
-//             (
-//                 TextStyle::Heading,
-//                 FontId::new(23.0, FontFamily::Proportional),
-//             ),
-//             (
-//                 TextStyle::Button,
-//                 FontId::new(23.0, FontFamily::Proportional),
-//             ),
-//         ]
-//         .into();
+        cc.egui_ctx.set_style(style);
 
-//         cc.egui_ctx.set_style(style);
+        let client;
+        let connection;
+        let state;
+        if let Some(storage) = cc.storage {
+            let token =
+                eframe::get_value::<Option<String>>(storage, eframe::APP_KEY).unwrap_or(None);
+            // token = None;
+            if token.is_some() {
+                client = Client::from_user_token(token.unwrap());
+                let ready;
+                (connection, ready) = client.connect()?;
+                state = State::new(ready);
+            }
+        } else {
+        }
 
-//         let (sender, receiver) = bounded(1);
+        Ok(Self {})
+    }
+}
 
-//         let ratelimit = Arc::new(
-//             Ratelimiter::builder(1, Duration::from_secs(5))
-//                 .max_tokens(5)
-//                 .initial_available(5)
-//                 .build()
-//                 .unwrap(),
-//         );
+impl App for Data {
+    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+        // ui(self, ctx, frame);
+        ctx.request_repaint();
+    }
 
-//         let token;
-//         if let Some(storage) = cc.storage {
-//             token = eframe::get_value::<Option<String>>(storage, eframe::APP_KEY).unwrap_or(None);
-//             // token = None;
-//             if token.is_some() {
-//                 let token_clone: String = token.clone().unwrap();
-//                 run_async(
-//                     move || SendMessage::GetDms(Client::get_dms(token_clone.clone())),
-//                     ratelimit.clone(),
-//                     sender.clone(),
-//                 );
-//             }
-//         } else {
-//             token = None;
-//         }
-
-//         Self {
-//             ratelimit,
-//             sender,
-//             receiver,
-//             token,
-//             cur_guild_id: None,
-//             cur_channel_id: None,
-//             text_edit: HashMap::new(),
-//             dm_channels: HashMap::new(),
-//             channel_messages: HashMap::new(),
-//         }
-//     }
-// }
-
-// impl App for Data {
-//     fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
-//         ui(self, ctx, frame);
-//         collect_message(self);
-//         ctx.request_repaint();
-//     }
-
-//     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-//         eframe::set_value(storage, eframe::APP_KEY, &self.token);
-//     }
-// }
-
-// fn run_async(
-//     message: impl Fn() -> SendMessage + Send + 'static,
-//     ratelimit: Arc<Ratelimiter>,
-//     sender: Sender<SendMessage>,
-// ) {
-//     let ratelimit = ratelimit.clone();
-//     thread::spawn(move || {
-//         while ratelimit.try_wait().is_err() {
-//             thread::sleep(Duration::from_millis(100));
-//         }
-//         sender.send(message()).unwrap();
-//     });
-// }
+    // fn save(&mut self, storage: &mut dyn eframe::Storage) {
+    //     eframe::set_value(storage, eframe::APP_KEY, &self.token);
+    // }
+}
 
 // fn ui(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
 //     if data.token.is_none() {

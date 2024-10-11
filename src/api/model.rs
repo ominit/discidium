@@ -6,20 +6,10 @@ use std::{
 };
 
 use anyhow::{Error, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tungstenite::{stream::MaybeTlsStream, WebSocket};
 
-fn decode_id(value: ureq::serde_json::Value) -> usize {
-    match value {
-        ureq::serde_json::Value::Number(num) => {
-            num.as_u64().expect("expected numeric id: {num}") as usize
-        }
-        ureq::serde_json::Value::String(str) => {
-            str.parse::<usize>().expect("expected numeric id: {str}")
-        }
-        _ => panic!("expected numeric id: {}", value),
-    }
-}
+use super::CDN_URL;
 
 pub struct Mention {
     prefix: &'static str,
@@ -35,13 +25,11 @@ impl std::fmt::Display for Mention {
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
-pub struct UserId(pub usize);
+pub struct UserId(
+    #[serde(deserialize_with = "serde_aux::prelude::deserialize_number_from_string")] pub usize,
+);
 
 impl UserId {
-    fn decode(value: ureq::serde_json::Value) -> Self {
-        Self(decode_id(value))
-    }
-
     #[inline(always)]
     pub fn mention(&self) -> Mention {
         Mention {
@@ -55,10 +43,6 @@ impl UserId {
 pub struct ChannelId(pub usize);
 
 impl ChannelId {
-    fn decode(value: ureq::serde_json::Value) -> Self {
-        Self(decode_id(value))
-    }
-
     #[inline(always)]
     pub fn mention(&self) -> Mention {
         Mention {
@@ -71,20 +55,10 @@ impl ChannelId {
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct ApplicationId(pub usize);
 
-impl ApplicationId {
-    fn decode(value: ureq::serde_json::Value) -> Self {
-        Self(decode_id(value))
-    }
-}
-
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct ServerId(pub usize);
 
 impl ServerId {
-    fn decode(value: ureq::serde_json::Value) -> Self {
-        Self(decode_id(value))
-    }
-
     pub fn everyone(self) -> RoleId {
         RoleId(self.0)
     }
@@ -93,20 +67,10 @@ impl ServerId {
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct MessageId(pub usize);
 
-impl MessageId {
-    fn decode(value: ureq::serde_json::Value) -> Self {
-        Self(decode_id(value))
-    }
-}
-
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct RoleId(pub usize);
 
 impl RoleId {
-    fn decode(value: ureq::serde_json::Value) -> Self {
-        Self(decode_id(value))
-    }
-
     #[inline(always)]
     pub fn mention(&self) -> Mention {
         Mention {
@@ -118,12 +82,6 @@ impl RoleId {
 
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct EmojiId(pub usize);
-
-impl EmojiId {
-    fn decode(value: ureq::serde_json::Value) -> Self {
-        Self(decode_id(value))
-    }
-}
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub enum ChannelType {
@@ -162,18 +120,18 @@ pub struct ServerInfo {
 #[derive(Debug, Deserialize)]
 pub struct ReadyEvent {
     // pub version: usize, // missing
-    // pub user: CurrentUser,
+    pub user: CurrentUser,
     pub session_id: String,
     // pub user_settings: Option<UserSettings>,
     // pub read_state: Option<Vec<ReadState>>,
     // pub private_channels: Vec<Channel>,
     // pub presences: Vec<Presence>,
-    // pub relationships: Vec<Relationship>,
+    pub relationships: Vec<Relationship>,
     // pub servers: Vec<PossibleServer<LiveServer>>,
     // pub user_server_settings: Option<Vec<UserServerSettings>>,
     // pub tutorial: Option<Tutorial>,
     // pub trace: Vec<Option<String>>, // missing
-    pub notes: Option<BTreeMap<UserId, Option<String>>>,
+    pub notes: BTreeMap<UserId, Option<String>>,
     pub shard: Option<[u8; 2]>,
 }
 
@@ -185,12 +143,12 @@ pub enum Event {
 
 impl Event {
     pub fn decode(kind: &str, value: ureq::serde_json::Value) -> Result<Self> {
-        match kind.clone() {
+        match kind {
             "READY" => Ok(Event::Ready(ureq::serde_json::from_value::<ReadyEvent>(
                 value,
             )?)),
-            other => {
-                println!("unknown event: {:?}", kind.clone());
+            _ => {
+                println!("unknown event: {:?}", kind);
                 Ok(Event::Unknown(kind.to_string(), value))
             }
         }
@@ -282,3 +240,57 @@ where
         }
     }
 }
+
+#[derive(Deserialize, Debug)]
+pub struct User {
+    pub id: UserId,
+    pub username: String,
+    #[serde(deserialize_with = "serde_aux::prelude::deserialize_number_from_string")]
+    pub discriminator: u16,
+    pub avatar: Option<String>,
+    #[serde(default)]
+    pub bot: bool,
+}
+
+impl User {
+    #[inline(always)]
+    pub fn mention(&self) -> Mention {
+        self.id.mention()
+    }
+
+    pub fn avatar_url(&self) -> Option<String> {
+        self.avatar
+            .as_ref()
+            .map(|x| format!("{}/avatars/{}/{}.jpg", CDN_URL, self.id.0, x))
+    }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CurrentUser {
+    pub id: UserId,
+    pub username: String,
+    #[serde(deserialize_with = "serde_aux::prelude::deserialize_number_from_string")]
+    pub discriminator: u16,
+    pub avatar: Option<String>,
+    pub email: Option<String>,
+    pub verified: bool,
+    pub mfa_enabled: bool,
+    #[serde(default)]
+    pub bot: bool,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Relationship {
+    pub id: UserId,
+    #[serde(rename = "type")]
+    pub relationship_type: RelationshipType,
+    pub user: User,
+}
+
+serde_aux::enum_number_declare!(pub RelationshipType {
+    Ignored = 0,
+    Friends = 1,
+    Blocked = 2,
+    IncomingRequest = 3,
+    OutgoingRequest = 4,
+});
