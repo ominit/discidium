@@ -1,28 +1,41 @@
-use std::{collections::HashMap, sync::Arc, thread, time::Duration};
+mod login;
 
+use std::collections::BTreeMap;
+
+use aes_gcm::{
+    aead::{Aead, OsRng},
+    AeadCore, Aes256Gcm, Key, KeyInit,
+};
 use anyhow::Result;
-use crossbeam_channel::{bounded, Receiver, Sender};
 use eframe::{
-    egui::{FontFamily, FontId, Layout, ScrollArea, TextEdit, TextStyle, Ui},
+    egui::{FontFamily, FontId, TextStyle},
     App,
 };
+use login::login_ui;
+use secrecy::{ExposeSecret, SecretString};
 
-use crate::api::{client::Client, state::State};
+use crate::api::{client::Client, state::State, Connection};
 
 pub fn create_ui() -> Result<()> {
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
         "discidium",
         native_options,
-        Box::new(|cc| Ok(Box::new(Data::new(cc)?))),
+        Box::new(|cc| Ok(Box::new(DiscidiumApp::new(cc)?))),
     )
     .unwrap();
     Ok(())
 }
 
-struct Data {}
+struct DiscidiumApp {
+    token: Option<SecretString>,
+    client: Option<Client>,
+    connection: Option<Connection>,
+    state: Option<State>,
+    text_edit: BTreeMap<String, String>,
+}
 
-impl Data {
+impl DiscidiumApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Result<Self> {
         let mut style = (*cc.egui_ctx.style()).clone();
         style.text_styles = [
@@ -40,44 +53,98 @@ impl Data {
 
         cc.egui_ctx.set_style(style);
 
-        let client;
-        let connection;
-        let state;
+        let mut app = Self {
+            token: None,
+            client: None,
+            connection: None,
+            state: None,
+            text_edit: BTreeMap::new(),
+        };
+
         if let Some(storage) = cc.storage {
-            let token =
-                eframe::get_value::<Option<String>>(storage, eframe::APP_KEY).unwrap_or(None);
-            // token = None;
-            if token.is_some() {
-                client = Client::from_user_token(token.unwrap());
-                let ready;
-                (connection, ready) = client.connect()?;
-                state = State::new(ready);
+            if let Some(Some((text, nonce))) =
+                eframe::get_value::<Option<(Vec<u8>, Vec<u8>)>>(storage, eframe::APP_KEY)
+            {
+                let sys = sysinfo::System::new_all();
+                let key = [
+                    [
+                        sys.total_memory().to_le_bytes(),
+                        sys.physical_core_count().unwrap().to_le_bytes(),
+                    ]
+                    .concat(),
+                    [0, 0, 0].to_vec(),
+                    sysinfo::System::distribution_id().into_bytes(),
+                    sysinfo::System::cpu_arch().unwrap().into_bytes().into(),
+                ]
+                .concat();
+                let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+                let token =
+                    String::from_utf8(cipher.decrypt((&nonce[..]).into(), &text[..]).unwrap())
+                        .unwrap();
+                app.update_from_token(SecretString::from(token))
             }
-        } else {
         }
 
-        Ok(Self {})
+        Ok(app)
+    }
+
+    pub fn update_from_token(&mut self, token: SecretString) {
+        let client = Client::from_user_token(token.clone());
+        let (connection, ready) = match client.connect() {
+            Ok(a) => a,
+            Err(err) => panic!("token wrong, Err: {:?}", err), // TODO if token doesnt work
+        };
+        self.client = Some(client);
+        self.connection = Some(connection);
+        self.state = Some(State::new(ready));
+        self.token = Some(token)
     }
 }
 
-impl App for Data {
+impl App for DiscidiumApp {
     fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
-        // ui(self, ctx, frame);
+        ui(self, ctx, frame);
         ctx.request_repaint();
     }
 
-    // fn save(&mut self, storage: &mut dyn eframe::Storage) {
-    //     eframe::set_value(storage, eframe::APP_KEY, &self.token);
-    // }
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if self.token.is_none() {
+            eframe::set_value(storage, eframe::APP_KEY, &None::<(Vec<u8>, Vec<u8>)>);
+            return;
+        }
+        let sys = sysinfo::System::new_all();
+        let key = [
+            [
+                sys.total_memory().to_le_bytes(),
+                sys.physical_core_count().unwrap().to_le_bytes(),
+            ]
+            .concat(),
+            [0, 0, 0].to_vec(),
+            sysinfo::System::distribution_id().into_bytes(),
+            sysinfo::System::cpu_arch().unwrap().into_bytes().into(),
+        ]
+        .concat();
+        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let text = cipher
+            .encrypt(
+                &nonce,
+                self.token.clone().unwrap().expose_secret().as_bytes(),
+            )
+            .unwrap();
+        println!("{:?}", text);
+
+        eframe::set_value(storage, eframe::APP_KEY, &Some((text, nonce.to_vec())));
+    }
 }
 
-// fn ui(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
-//     if data.token.is_none() {
-//         login_ui(data, ctx, frame);
-//         return;
-//     }
-//     central_panel(data, ctx, frame);
-// }
+fn ui(app: &mut DiscidiumApp, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+    if app.token.is_none() {
+        login_ui(app, ctx);
+        return;
+    }
+    // central_panel(app, ctx, frame);
+}
 
 // fn central_panel(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
 //     eframe::egui::CentralPanel::default().show(ctx, |ui| {
@@ -185,52 +252,6 @@ impl App for Data {
 //                     }
 //                 }
 //             });
-//     });
-// }
-
-// fn login_ui(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
-//     eframe::egui::CentralPanel::default().show(ctx, |ui| {
-//         ui.label("login");
-//         // ui.horizontal(|ui| {
-//         //     ui.label("email");
-//         //     let mut text = data.text_edit.remove("login_email").unwrap_or_default();
-
-//         //     ui.text_edit_singleline(&mut text);
-//         //     data.text_edit.insert("login_email".to_string(), text);
-//         // });
-//         // ui.horizontal(|ui| {
-//         //     ui.label("password");
-//         //     let mut text = data.text_edit.remove("login_password").unwrap_or_default();
-
-//         //     ui.add(TextEdit::singleline(&mut text).password(true));
-//         //     data.text_edit.insert("login_password".to_string(), text);
-//         // });
-//         // if data.text_edit.contains_key("login_password")
-//         //     && data.text_edit.contains_key("login_email")
-//         //     && ui.button("submit").clicked()
-//         // {
-//         //     let email = data.text_edit.remove("login_email").unwrap();
-//         //     let password = data.text_edit.remove("login_password").unwrap();
-//         //     let sender = data.sender.clone();
-//         //     let ratelimit = &data.ratelimit;
-//         //     run_async(
-//         //         move || Message::GetToken(Client::login_user(email.clone(), password.clone())),
-//         //         ratelimit,
-//         //         sender,
-//         //     );
-//         // }
-//         ui.horizontal(|ui| {
-//             ui.label("token");
-//             let mut text = data.text_edit.remove("login_token").unwrap_or_default();
-
-//             ui.add(TextEdit::singleline(&mut text).password(true));
-//             data.text_edit.insert("login_token".to_string(), text);
-//         });
-//         if data.text_edit.contains_key("login_token") && ui.button("submit").clicked() {
-//             let _ = data
-//                 .token
-//                 .insert(data.text_edit.remove("login_token").unwrap());
-//         }
 //     });
 // }
 

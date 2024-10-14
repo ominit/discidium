@@ -1,4 +1,5 @@
 use anyhow::Result;
+use secrecy::{ExposeSecret, SecretString};
 use ureq::Response;
 
 use crate::api::USER_AGENT;
@@ -7,20 +8,22 @@ use super::{connection::Connection, model::ReadyEvent, ratelimit::RateLimits, EN
 
 pub struct Client {
     ratelimits: RateLimits,
-    token: String,
+    client: ureq::Agent,
+    token: SecretString,
 }
 
 impl Client {
-    pub fn from_user_token(token: impl Into<String>) -> Self {
+    pub fn from_user_token(token: SecretString) -> Self {
         Self {
             ratelimits: Default::default(),
-            token: token.into(),
+            client: ureq::agent(),
+            token,
         }
     }
 
     pub fn connect(&self) -> Result<(Connection, ReadyEvent)> {
         let url = self.get_gateway_url()?;
-        Connection::new(&url, &self.token)
+        Connection::new(&url, self.token.clone())
     }
 
     /// pass None for json_body to make a request without a body
@@ -35,31 +38,39 @@ impl Client {
         self.ratelimits.pre_check(url);
         let response;
         if json_body.is_some() {
-            response = ureq::request(method.into(), url)
+            response = self
+                .client
+                .request(method.into(), url)
                 .set("Content-Type", "application/json")
                 .set("User-Agent", USER_AGENT)
-                .set("Authorization", &self.token)
+                .set("Authorization", &self.token.expose_secret())
                 .send_json(json_body.clone().unwrap())?;
         } else {
-            response = ureq::request(method.into(), url)
+            response = self
+                .client
+                .request(method.into(), url)
                 .set("Content-Type", "application/json")
                 .set("User-Agent", USER_AGENT)
-                .set("Authorization", &self.token)
+                .set("Authorization", &self.token.expose_secret())
                 .call()?;
         }
         if self.ratelimits.check_for_ratelimit(url, &response) {
             let response;
             if json_body.is_some() {
-                response = ureq::request(method.into(), url)
+                response = self
+                    .client
+                    .request(method.into(), url)
                     .set("Content-Type", "application/json")
                     .set("User-Agent", USER_AGENT)
-                    .set("Authorization", &self.token)
+                    .set("Authorization", &self.token.expose_secret())
                     .send_json(json_body.unwrap())?;
             } else {
-                response = ureq::request(method.into(), url)
+                response = self
+                    .client
+                    .request(method.into(), url)
                     .set("Content-Type", "application/json")
                     .set("User-Agent", USER_AGENT)
-                    .set("Authorization", &self.token)
+                    .set("Authorization", &self.token.expose_secret())
                     .call()?;
             }
             self.ratelimits.check_for_ratelimit(url, &response);
@@ -75,7 +86,7 @@ impl Client {
             .get("url")
             .expect("no url in response to get_gateway_url")
             .as_str()
-            .unwrap()
+            .expect("could not parse str")
             .replace("\"", ""))
     }
 }

@@ -1,10 +1,10 @@
 use std::{
-    any::Any,
     net::TcpStream,
     sync::{Arc, Mutex},
 };
 
 use anyhow::{Error, Result};
+use secrecy::{ExposeSecret, SecretString};
 use tungstenite::{stream::MaybeTlsStream, WebSocket};
 
 use crate::api::model::{receive_json, Event, GatewayEvent};
@@ -14,7 +14,7 @@ use super::model::{ReadyEvent, UserId};
 pub struct Connection {
     keepalive_channel: crossbeam_channel::Sender<Status>,
     websocket: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
-    token: String,
+    token: SecretString,
     session_id: Option<String>,
     last_sequence: usize,
     identify: ureq::serde_json::Value,
@@ -24,9 +24,9 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(url: &str, token: &str) -> Result<(Self, ReadyEvent)> {
+    pub fn new(url: &str, token: SecretString) -> Result<(Self, ReadyEvent)> {
         let d = ureq::json!({
-            "token": token,
+            "token": token.expose_secret(),
             "properties": {
                 "$os": std::env::consts::OS,
                 "$browser": "discidium",
@@ -82,7 +82,7 @@ impl Connection {
             Self {
                 keepalive_channel: sender,
                 websocket,
-                token: token.to_string(),
+                token,
                 session_id: Some(session_id),
                 last_sequence: sequence,
                 identify,

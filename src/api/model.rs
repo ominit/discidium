@@ -117,7 +117,7 @@ pub struct ServerInfo {
     // pub permissions: Permissions,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ReadyEvent {
     // pub version: usize, // missing
     pub user: CurrentUser,
@@ -241,7 +241,7 @@ where
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct User {
     pub id: UserId,
     pub username: String,
@@ -265,7 +265,7 @@ impl User {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct CurrentUser {
     pub id: UserId,
     pub username: String,
@@ -279,7 +279,7 @@ pub struct CurrentUser {
     pub bot: bool,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Relationship {
     pub id: UserId,
     #[serde(rename = "type")]
