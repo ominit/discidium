@@ -1,12 +1,15 @@
 use std::collections::BTreeMap;
 
-use super::model::{CurrentUser, Event, ReadyEvent, Relationship, ServerId, UserId};
+use super::model::{
+    CurrentUser, Event, Group, PrivateChannel, PublicChannel, ReadyEvent, Relationship, ServerId,
+    UserId,
+};
 
 pub struct State {
     user: CurrentUser,
     // servers: Vec<LiveServer>,
     dead_servers: Vec<ServerId>,
-    // private_channels: Vec<PrivateChannels>,
+    // private_channels: Vec<PrivateChannel>,
     // groups: BTreeMap<ChannelId, Group>,
     // calls: BTreeMap<ChannelId, Call>,
     // presences: Vec<Presence>,
@@ -53,8 +56,8 @@ impl State {
     }
 }
 
-// pub enum ChannelRef<'a> {
-//     Private(&'a PrivateChannel),
-//     Group(&'a Group),
-//     Public(&'a LiveServer, &'a PublicChannel),
-// }
+pub enum ChannelRef<'a> {
+    Private(&'a PrivateChannel),
+    Group(&'a Group),
+    // Public(&'a LiveServer, &'a PublicChannel),
+}

@@ -1,12 +1,14 @@
+mod central_panel;
 mod login;
 
 use std::collections::BTreeMap;
 
 use aes_gcm::{
     aead::{Aead, OsRng},
-    AeadCore, Aes256Gcm, Key, KeyInit,
+    AeadCore, Aes256Gcm, KeyInit,
 };
 use anyhow::Result;
+use central_panel::central_panel;
 use eframe::{
     egui::{FontFamily, FontId, TextStyle},
     App,
@@ -132,7 +134,6 @@ impl App for DiscidiumApp {
                 self.token.clone().unwrap().expose_secret().as_bytes(),
             )
             .unwrap();
-        println!("{:?}", text);
 
         eframe::set_value(storage, eframe::APP_KEY, &Some((text, nonce.to_vec())));
     }
@@ -143,34 +144,8 @@ fn ui(app: &mut DiscidiumApp, ctx: &eframe::egui::Context, _frame: &mut eframe::
         login_ui(app, ctx);
         return;
     }
-    // central_panel(app, ctx, frame);
+    central_panel(app, ctx);
 }
-
-// fn central_panel(data: &mut Data, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
-//     eframe::egui::CentralPanel::default().show(ctx, |ui| {
-//         ui.horizontal(|ui| {
-//             servers_ui(data, ui);
-//             ui.separator();
-//             if data.cur_guild_id.is_some() {
-//                 ui.vertical(|ui| {
-//                     ui.label("channels");
-//                     ui.label("todo");
-//                 });
-//             } else {
-//                 dm_channels_ui(data, ui);
-//             }
-//             ui.separator();
-//             if data.cur_channel_id.is_some() {
-//                 messages_ui(data, ui);
-//             } else {
-//                 ui.vertical(|ui| {
-//                     ui.label("friends");
-//                     ui.label("todo");
-//                 });
-//             }
-//         });
-//     });
-// }
 
 // fn servers_ui(data: &mut Data, ui: &mut Ui) {
 //     ui.vertical(|ui| {

@@ -77,6 +77,7 @@ impl Connection {
         }
 
         let session_id = ready.session_id.clone();
+        println!("{:?}", ready.clone());
 
         Ok((
             Self {
@@ -113,7 +114,9 @@ fn keepalive(
                     .unwrap()
                     .send(tungstenite::Message::Text(val.to_string()))
                 {
-                    Ok(_) => {}
+                    Ok(message) => {
+                        println!("send message response (in keepalive): {:?}", message);
+                    }
                     Err(e) => {
                         println!("{:?}", e)
                     }
@@ -135,6 +138,7 @@ fn keepalive(
                 "op": 1,
                 "d": last_sequence
             });
+            println!("heartbeat");
             websocket
                 .lock()
                 .unwrap()
