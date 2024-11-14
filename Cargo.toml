@@ -10,10 +10,18 @@ chrono = { version = "0.4.38", features = ["serde"] }
 crossbeam-channel = "0.5.13"
 eframe = { version = "0.29.0", features = ["persistence"] }
 flate2 = "1.0.34"
+keyring = { version = "3.6.1", features = [
+  "apple-native",
+  "windows-native",
+  "linux-native-sync-persistent",
+] }
 pollster = "0.3.0"
 secrecy = { version = "0.10.3", features = ["serde"] }
 serde = { version = "1.0.210", features = ["derive"] }
 serde-aux = "4.5.0"
 sysinfo = "0.32.0"
-tungstenite = { version = "0.24.0", features = ["rustls", "rustls-tls-native-roots"] }
-ureq = { version = "2.10.1", features = [ "json" ] }
+tungstenite = { version = "0.24.0", features = [
+  "rustls",
+  "rustls-tls-native-roots",
+] }
+ureq = { version = "2.10.1", features = ["json"] }

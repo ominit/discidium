@@ -27,6 +27,7 @@
       craneLib = crane.mkLib pkgs;
       nativeBuildInputs = with pkgs; [
         pkg-config
+        makeWrapper
         gtk3
       ];
 
@@ -36,13 +37,23 @@
         libxkbcommon
         libGL
       ];
-    in {
-      packages.default = craneLib.buildPackage {
-        src = craneLib.cleanCargoSource ./.;
 
-        LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
-        RUST_BACKTRACE = 1;
+      discidium = craneLib.buildPackage {
+        name = "discidium";
+        src = craneLib.cleanCargoSource ./.;
+        inherit buildInputs nativeBuildInputs;
+
+        postInstall = ''
+          wrapProgram $out/bin/discidium \
+            --prefix LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}"
+        '';
       };
+    in {
+      packages.default = discidium;
+      apps.default = flake-utils.lib.mkApp {
+        drv = discidium;
+      };
+
       devShell = pkgs.mkShell {
         inherit nativeBuildInputs buildInputs;
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
