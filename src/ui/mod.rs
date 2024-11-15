@@ -3,16 +3,13 @@ mod login;
 
 use std::collections::BTreeMap;
 
-use aes_gcm::{
-    aead::{Aead, OsRng},
-    AeadCore, Aes256Gcm, KeyInit,
-};
 use anyhow::Result;
 use central_panel::central_panel;
 use eframe::{
     egui::{FontFamily, FontId, TextStyle},
     App,
 };
+use keyring::Entry;
 use login::login_ui;
 use secrecy::{ExposeSecret, SecretString};
 
@@ -63,28 +60,10 @@ impl DiscidiumApp {
             text_edit: BTreeMap::new(),
         };
 
-        if let Some(storage) = cc.storage {
-            if let Some(Some((text, nonce))) =
-                eframe::get_value::<Option<(Vec<u8>, Vec<u8>)>>(storage, eframe::APP_KEY)
-            {
-                let sys = sysinfo::System::new_all();
-                let key = [
-                    [
-                        sys.total_memory().to_le_bytes(),
-                        sys.physical_core_count().unwrap().to_le_bytes(),
-                    ]
-                    .concat(),
-                    [0, 0, 0].to_vec(),
-                    sysinfo::System::distribution_id().into_bytes(),
-                    sysinfo::System::cpu_arch().unwrap().into_bytes().into(),
-                ]
-                .concat();
-                let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
-                let token =
-                    String::from_utf8(cipher.decrypt((&nonce[..]).into(), &text[..]).unwrap())
-                        .unwrap();
-                app.update_from_token(SecretString::from(token))
-            }
+        let entry = Entry::new("discidium", &whoami::username());
+        if entry.is_ok() && entry.as_ref().unwrap().get_password().is_ok() {
+            let token = entry.unwrap().get_password().unwrap();
+            app.update_from_token(SecretString::from(token));
         }
 
         Ok(app)
@@ -114,28 +93,11 @@ impl App for DiscidiumApp {
             eframe::set_value(storage, eframe::APP_KEY, &None::<(Vec<u8>, Vec<u8>)>);
             return;
         }
-        let sys = sysinfo::System::new_all();
-        let key = [
-            [
-                sys.total_memory().to_le_bytes(),
-                sys.physical_core_count().unwrap().to_le_bytes(),
-            ]
-            .concat(),
-            [0, 0, 0].to_vec(),
-            sysinfo::System::distribution_id().into_bytes(),
-            sysinfo::System::cpu_arch().unwrap().into_bytes().into(),
-        ]
-        .concat();
-        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let text = cipher
-            .encrypt(
-                &nonce,
-                self.token.clone().unwrap().expose_secret().as_bytes(),
-            )
-            .unwrap();
 
-        eframe::set_value(storage, eframe::APP_KEY, &Some((text, nonce.to_vec())));
+        let entry = Entry::new("discidium", &whoami::username()).unwrap();
+        entry
+            .set_password(self.token.clone().unwrap().expose_secret())
+            .unwrap();
     }
 }
 

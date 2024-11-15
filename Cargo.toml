@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aes-gcm = "0.10.3"
 anyhow = "1.0.89"
 chrono = { version = "0.4.38", features = ["serde"] }
 crossbeam-channel = "0.5.13"
@@ -19,9 +18,9 @@ pollster = "0.3.0"
 secrecy = { version = "0.10.3", features = ["serde"] }
 serde = { version = "1.0.210", features = ["derive"] }
 serde-aux = "4.5.0"
-sysinfo = "0.32.0"
 tungstenite = { version = "0.24.0", features = [
   "rustls",
   "rustls-tls-native-roots",
 ] }
 ureq = { version = "2.10.1", features = ["json"] }
+whoami = "1.5.2"
