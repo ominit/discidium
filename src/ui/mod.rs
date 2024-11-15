@@ -78,7 +78,11 @@ impl DiscidiumApp {
         self.client = Some(client);
         self.connection = Some(connection);
         self.state = Some(State::new(ready));
-        self.token = Some(token)
+        self.token = Some(token);
+        let entry = Entry::new("discidium", &whoami::username()).unwrap();
+        entry
+            .set_password(self.token.clone().unwrap().expose_secret())
+            .unwrap();
     }
 }
 
@@ -86,18 +90,6 @@ impl App for DiscidiumApp {
     fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
         ui(self, ctx, frame);
         ctx.request_repaint();
-    }
-
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        if self.token.is_none() {
-            eframe::set_value(storage, eframe::APP_KEY, &None::<(Vec<u8>, Vec<u8>)>);
-            return;
-        }
-
-        let entry = Entry::new("discidium", &whoami::username()).unwrap();
-        entry
-            .set_password(self.token.clone().unwrap().expose_secret())
-            .unwrap();
     }
 }
 
