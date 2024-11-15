@@ -57,7 +57,7 @@
       devShell = pkgs.mkShell {
         inherit nativeBuildInputs buildInputs;
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
-        RUST_BACKTRACE = 1;
+        # RUST_BACKTRACE = 1;
       };
     });
 }

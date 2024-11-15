@@ -13,6 +13,7 @@ use serde::{
     Deserialize,
 };
 use tungstenite::{stream::MaybeTlsStream, WebSocket};
+use ureq::serde_json::Value;
 
 use super::CDN_URL;
 
@@ -57,7 +58,7 @@ impl ChannelId {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
+#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
 pub struct ApplicationId(pub usize);
 
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
@@ -105,7 +106,7 @@ pub enum ChannelType {
     Forum,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct ChannelCategory {
     pub name: String,
     pub parent_id: Option<ChannelId>,
@@ -222,6 +223,7 @@ impl Member {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum Channel {
     Group(Group),
     Private(PrivateChannel),
@@ -251,7 +253,7 @@ impl Channel {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Group {
     #[serde(rename = "id")]
     pub channel_id: ChannelId,
@@ -300,6 +302,7 @@ pub struct Call {
     // pub voice_states: Vec<VoiceState>,
 }
 
+#[derive(Debug, Clone)]
 pub struct PrivateChannel {
     pub id: ChannelId,
     pub channel_type: ChannelType,
@@ -502,7 +505,7 @@ serde_aux::enum_number_declare!(pub RelationshipType {
     OutgoingRequest = 4,
 });
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ReadyEvent {
     // pub version: usize, // missing
     pub user: CurrentUser,
@@ -520,18 +523,49 @@ pub struct ReadyEvent {
     pub shard: Option<[u8; 2]>,
 }
 
+impl ReadyEvent {
+    pub fn decode(value: Value) -> Result<Self> {
+        let mut shard = None;
+        if value.get("shard").is_some() {
+            shard.insert(ureq::serde_json::from_value(
+                value.get("shard").unwrap().clone(),
+            )?);
+        }
+        Ok(Self {
+            user: ureq::serde_json::from_value(
+                value
+                    .get("user")
+                    .expect("user not found in ReadyEvent")
+                    .clone(),
+            )?,
+            session_id: ureq::serde_json::from_value(
+                value
+                    .get("session_id")
+                    .expect("session_id not found in ReadyEvent")
+                    .clone(),
+            )?,
+            relationships: ureq::serde_json::from_value(
+                value
+                    .get("relationships")
+                    .expect("relationships not found in ReadyEvent")
+                    .clone(),
+            )?,
+            notes: ureq::serde_json::from_value(value.get("notes").unwrap().clone())?,
+            shard,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub enum Event {
     Ready(ReadyEvent),
-    Unknown(String, ureq::serde_json::Value),
+    Unknown(String, Value),
 }
 
 impl Event {
-    pub fn decode(kind: &str, value: ureq::serde_json::Value) -> Result<Self> {
+    pub fn decode(kind: &str, value: Value) -> Result<Self> {
         match kind {
-            "READY" => Ok(Event::Ready(ureq::serde_json::from_value::<ReadyEvent>(
-                value,
-            )?)),
+            "READY" => Ok(Event::Ready(ReadyEvent::decode(value)?)),
             _ => {
                 println!("unknown event: {:?}", kind);
                 Ok(Event::Unknown(kind.to_string(), value))
@@ -551,7 +585,7 @@ pub enum GatewayEvent {
 }
 
 impl GatewayEvent {
-    pub fn decode(value: ureq::serde_json::Value) -> Result<Self> {
+    pub fn decode(value: Value) -> Result<Self> {
         Ok(match value.get("op").and_then(|x| x.as_u64()) {
             Some(0) => GatewayEvent::Dispatch(
                 value
