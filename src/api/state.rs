@@ -6,30 +6,30 @@ use super::model::{
 };
 
 pub struct State {
-    user: CurrentUser,
+    // user: CurrentUser,
     // servers: Vec<LiveServer>,
-    dead_servers: Vec<ServerId>,
+    // dead_servers: Vec<ServerId>,
     // private_channels: Vec<PrivateChannel>,
     // groups: BTreeMap<ChannelId, Group>,
     // calls: BTreeMap<ChannelId, Call>,
     // presences: Vec<Presence>,
-    relationships: Vec<Relationship>,
+    // relationships: Vec<Relationship>,
     // settings: UserSettings,
     // server_settings: Vec<ServersSettings>,
-    notes: Option<BTreeMap<UserId, Option<String>>>,
+    // notes: Option<BTreeMap<UserId, Option<String>>>,
 }
 
 impl State {
     pub fn new(ready: ReadyEvent) -> Self {
         // let mut servers = Vec::new();
-        let mut unavailable = Vec::new();
+        // let mut unavailable = Vec::new();
         // for server in ready.servers {}
 
         Self {
-            user: ready.user,
-            dead_servers: unavailable,
-            relationships: ready.relationships,
-            notes: Some(ready.notes),
+            // user: ready.user,
+            // dead_servers: unavailable,
+            // relationships: ready.relationships,
+            // notes: Some(ready.notes),
         }
     }
 
@@ -38,21 +38,6 @@ impl State {
             Event::Ready(ref ready) => *self = State::new(ready.clone()),
             _ => {}
         }
-    }
-
-    #[inline]
-    pub fn user(&self) -> &CurrentUser {
-        &self.user
-    }
-
-    #[inline]
-    pub fn relationships(&self) -> &[Relationship] {
-        &self.relationships
-    }
-
-    #[inline]
-    pub fn notes(&self) -> Option<&BTreeMap<UserId, Option<String>>> {
-        self.notes.as_ref()
     }
 }
 

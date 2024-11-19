@@ -13,9 +13,44 @@ use serde::{
     Deserialize,
 };
 use tungstenite::{stream::MaybeTlsStream, WebSocket};
-use ureq::serde_json::Value;
+use ureq::serde_json::{Map, Value};
 
 use super::CDN_URL;
+
+fn remove_value(map: &mut Map<String, Value>, key: &str) -> Option<Value> {
+    map.remove(key)
+}
+
+fn decode_string(value: Option<Value>) -> Option<String> {
+    if value.as_ref()?.is_null() {
+        return None;
+    }
+    Some(value?.as_str()?.to_owned())
+}
+
+fn decode_bool(value: Option<Value>) -> Option<bool> {
+    if value.as_ref()?.is_null() {
+        return None;
+    }
+    Some(value?.as_bool()?)
+}
+
+fn decode_u64(value: Option<Value>) -> Option<u64> {
+    if value.as_ref()?.is_null() {
+        return None;
+    }
+    Some(value?.as_u64()?)
+}
+
+fn decode_array<T, F: Fn(Value) -> T>(value: Option<Value>, f: F) -> Option<Vec<T>> {
+    Some(
+        value?
+            .as_array()?
+            .iter()
+            .map(|x| f(x.clone()))
+            .collect::<Vec<_>>(),
+    )
+}
 
 pub struct Mention {
     prefix: &'static str,
@@ -36,6 +71,10 @@ pub struct UserId(
 );
 
 impl UserId {
+    fn decode(value: Option<Value>) -> Result<Self> {
+        Ok(Self(decode_string(value).unwrap().parse()?))
+    }
+
     #[inline(always)]
     pub fn mention(&self) -> Mention {
         Mention {
@@ -88,6 +127,9 @@ impl RoleId {
 
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct EmojiId(pub usize);
+
+#[derive(Clone, Debug)]
+pub struct Emoji(pub String);
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Deserialize)]
 pub enum ChannelType {
@@ -182,26 +224,57 @@ pub struct Ban {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct User {
-    pub id: UserId,
-    pub username: String,
-    #[serde(deserialize_with = "serde_aux::prelude::deserialize_number_from_string")]
+    pub avatar: String,
+    pub avatar_decoration_data: Option<String>, // TODO
+    pub clan: Option<String>,
     pub discriminator: u16,
-    pub avatar: Option<String>,
-    #[serde(default)]
-    pub bot: bool,
+    pub global_name: Option<String>,
+    pub id: UserId,
+    pub public_flags: u64,
+    pub username: String,
 }
 
 impl User {
-    #[inline(always)]
-    pub fn mention(&self) -> Mention {
-        self.id.mention()
+    fn decode(mut value: Option<Value>) -> Self {
+        let value = value.as_mut().unwrap().as_object_mut().unwrap();
+        let avatar = decode_string(remove_value(value, "avatar")).unwrap();
+        let avatar_decoration_data = decode_string(remove_value(value, "avatar_decoration_data"));
+        let clan = decode_string(remove_value(value, "clan"));
+        let discriminator = remove_value(value, "discriminator")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+        let global_name = decode_string(remove_value(value, "global_name"));
+        let id = UserId::decode(remove_value(value, "id")).unwrap();
+        let public_flags = decode_u64(remove_value(value, "public_flags")).unwrap();
+        let username = decode_string(remove_value(value, "username")).unwrap();
+        if !value.is_empty() {
+            panic!("value not taken out of User: {:?}", value);
+        }
+        Self {
+            avatar,
+            avatar_decoration_data,
+            clan,
+            discriminator,
+            global_name,
+            id,
+            public_flags,
+            username,
+        }
     }
 
-    pub fn avatar_url(&self) -> Option<String> {
-        self.avatar
-            .as_ref()
-            .map(|x| format!("{}/avatars/{}/{}.jpg", CDN_URL, self.id.0, x))
-    }
+    // #[inline(always)]
+    // pub fn mention(&self) -> Mention {
+    //     self.id.mention()
+    // }
+
+    // pub fn avatar_url(&self) -> Option<String> {
+    //     self.avatar
+    //         .as_ref()
+    //         .map(|x| format!("{}/avatars/{}/{}.jpg", CDN_URL, self.id.0, x))
+    // }
 }
 
 pub struct Member {
@@ -214,13 +287,13 @@ pub struct Member {
 }
 
 impl Member {
-    pub fn display_name(&self) -> &str {
-        if let Some(name) = self.nick.as_ref() {
-            name
-        } else {
-            &self.user.username
-        }
-    }
+    // pub fn display_name(&self) -> &str {
+    //     if let Some(name) = self.nick.as_ref() {
+    //         name
+    //     } else {
+    //         &self.user.username
+    //     }
+    // }
 }
 
 #[derive(Debug, Clone)]
@@ -267,23 +340,23 @@ pub struct Group {
 }
 
 impl Group {
-    pub fn name(&self) -> Cow<str> {
-        match self.name {
-            Some(ref name) => Cow::Borrowed(name),
-            None => {
-                if self.recipients.is_empty() {
-                    return Cow::Borrowed("Empty Group");
-                }
-                Cow::Owned(
-                    self.recipients
-                        .iter()
-                        .map(|x| x.username.clone())
-                        .collect::<Vec<String>>()
-                        .join(", "),
-                )
-            }
-        }
-    }
+    // pub fn name(&self) -> Cow<str> {
+    //     match self.name {
+    //         Some(ref name) => Cow::Borrowed(name),
+    //         None => {
+    //             if self.recipients.is_empty() {
+    //                 return Cow::Borrowed("Empty Group");
+    //             }
+    //             Cow::Owned(
+    //                 self.recipients
+    //                     .iter()
+    //                     .map(|x| x.username.clone())
+    //                     .collect::<Vec<String>>()
+    //                     .join(", "),
+    //             )
+    //         }
+    //     }
+    // }
 
     pub fn icon_url(&self) -> Option<String> {
         self.icon
@@ -477,16 +550,103 @@ impl<'de> Visitor<'de> for PermissionOverwriteVisitor {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct CurrentUser {
-    pub id: UserId,
-    pub username: String,
-    #[serde(deserialize_with = "serde_aux::prelude::deserialize_number_from_string")]
-    pub discriminator: u16,
+    pub accent_color: Option<String>, // TODO idk what type
     pub avatar: Option<String>,
-    pub email: Option<String>,
-    pub verified: bool,
+    pub avatar_decoration_data: Option<String>, // TODO
+    pub banner: Option<String>,                 // TODO
+    pub banner_color: Option<String>,           // TODO
+    pub bio: String,
+    pub clan: Option<String>, // TODO
+    pub desktop: bool,
+    pub discriminator: u16,
+    pub email: String,
+    pub flags: u64,
+    pub global_name: String,
+    pub id: UserId,
     pub mfa_enabled: bool,
-    #[serde(default)]
-    pub bot: bool,
+    pub mobile: bool,
+    pub nsfw_allowed: bool,
+    pub phone: String,
+    pub premium: bool,
+    pub premium_type: u64,
+    pub pronouns: String,
+    pub purchased_flags: u64,
+    pub username: String,
+    pub verified: bool,
+}
+
+impl CurrentUser {
+    fn decode(mut value: Option<Value>) -> Self {
+        let value = value.as_mut().unwrap().as_object_mut().unwrap();
+        let accent_color = decode_string(remove_value(value, "accent_color"));
+        let avatar = decode_string(remove_value(value, "avatar"));
+        let avatar_decoration_data = decode_string(remove_value(value, "avatar_decoration_data"));
+        let banner = decode_string(remove_value(value, "banner"));
+        let banner_color = decode_string(remove_value(value, "banner_color"));
+        let bio = decode_string(remove_value(value, "bio")).unwrap();
+        let clan = decode_string(remove_value(value, "clan"));
+        let desktop = remove_value(value, "desktop").unwrap().as_bool().unwrap();
+        let discriminator = remove_value(value, "discriminator")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+        let email = decode_string(remove_value(value, "email")).unwrap();
+        let flags = remove_value(value, "flags").unwrap().as_u64().unwrap();
+        let global_name = decode_string(remove_value(value, "global_name")).unwrap();
+        let id = UserId::decode(remove_value(value, "id")).unwrap();
+        let mfa_enabled = remove_value(value, "mfa_enabled")
+            .unwrap()
+            .as_bool()
+            .unwrap();
+        let mobile = remove_value(value, "mobile").unwrap().as_bool().unwrap();
+        let nsfw_allowed = remove_value(value, "nsfw_allowed")
+            .unwrap()
+            .as_bool()
+            .unwrap();
+        let phone = decode_string(remove_value(value, "phone")).unwrap();
+        let premium = remove_value(value, "premium").unwrap().as_bool().unwrap();
+        let premium_type = remove_value(value, "premium_type")
+            .unwrap()
+            .as_u64()
+            .unwrap();
+        let pronouns = decode_string(remove_value(value, "pronouns")).unwrap();
+        let purchased_flags = remove_value(value, "purchased_flags")
+            .unwrap()
+            .as_u64()
+            .unwrap();
+        let username = decode_string(remove_value(value, "username")).unwrap();
+        let verified = remove_value(value, "verified").unwrap().as_bool().unwrap();
+        if !value.is_empty() {
+            panic!("value not taken out of CurrentUser: {:?}", value);
+        }
+        Self {
+            accent_color,
+            avatar,
+            avatar_decoration_data,
+            banner,
+            banner_color,
+            bio,
+            clan,
+            desktop,
+            discriminator,
+            email,
+            flags,
+            global_name,
+            id,
+            mfa_enabled,
+            mobile,
+            nsfw_allowed,
+            phone,
+            premium,
+            premium_type,
+            pronouns,
+            purchased_flags,
+            username,
+            verified,
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -495,6 +655,10 @@ pub struct Relationship {
     #[serde(rename = "type")]
     pub relationship_type: RelationshipType,
     pub user: User,
+    pub is_spam_request: bool,
+    pub nickname: Option<String>, // TODO
+    pub since: String,
+    pub user_ignored: bool,
 }
 
 serde_aux::enum_number_declare!(pub RelationshipType {
@@ -506,52 +670,227 @@ serde_aux::enum_number_declare!(pub RelationshipType {
 });
 
 #[derive(Debug, Clone)]
+pub struct Presence {
+    pub activities: Vec<PresenceActivity>,
+    pub client_status: PresenceClientStatus,
+    pub last_modified: u64,
+    pub status: Status,
+}
+
+impl Presence {
+    fn decode(mut value: Value) -> Self {
+        let value = value.as_object_mut().unwrap();
+        let activities =
+            decode_array(remove_value(value, "activities"), PresenceActivity::decode).unwrap();
+        let client_status = PresenceClientStatus::decode(remove_value(value, "client_status"));
+        let last_modified = decode_u64(remove_value(value, "last_modified")).unwrap();
+        let status = Status::decode(remove_value(value, "status")).unwrap();
+        let user = User::decode(remove_value(value, "user"));
+        if !value.is_empty() {
+            panic!("value not taken out of Presence: {:?}", value);
+        }
+        Self {
+            activities,
+            client_status,
+            last_modified,
+            status,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Status {
+    DND,
+}
+
+impl Status {
+    fn decode(value: Option<Value>) -> Option<Self> {
+        Some(match decode_string(value)?.as_str() {
+            "dnd" => Status::DND,
+            other => panic!("unknown status: {:?}", other),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PresenceClientStatus {
+    pub desktop: Status,
+    pub mobile: Option<Status>,
+}
+
+impl PresenceClientStatus {
+    fn decode(mut value: Option<Value>) -> Self {
+        let value = value.as_mut().unwrap().as_object_mut().unwrap();
+        let desktop = Status::decode(remove_value(value, "desktop")).unwrap();
+        let mobile = Status::decode(remove_value(value, "mobile"));
+        if !value.is_empty() {
+            panic!("value not taken out of PresenceClientStatus: {:?}", value);
+        }
+        Self { desktop, mobile }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PresenceActivity {
+    pub assets: Option<PresenceActivityAsset>,
+    pub created_at: u64,
+    pub details: Option<String>,
+    pub emoji: Option<Emoji>,
+    pub flags: Option<u64>,
+    pub id: String,
+    pub name: String,
+    pub party: Option<PresenceActivityParty>,
+    pub session_id: Option<String>,
+    pub state: String,
+    pub sync_id: Option<String>,
+    pub timestamp_end: Option<String>,
+    pub timestamp_start: Option<String>,
+    pub type_activity: u64,
+}
+
+impl PresenceActivity {
+    fn decode(mut value: Value) -> Self {
+        let value = value.as_object_mut().unwrap();
+        let assets = PresenceActivityAsset::decode(remove_value(value, "assets"));
+        let created_at = decode_u64(remove_value(value, "created_at")).unwrap();
+        let details = decode_string(remove_value(value, "details"));
+        let emoji = None;
+        remove_value(value, "emoji"); // TODO
+        let flags = decode_u64(remove_value(value, "flags"));
+        let id = decode_string(remove_value(value, "id")).unwrap();
+        let name = decode_string(remove_value(value, "name")).unwrap();
+        let party = PresenceActivityParty::decode(remove_value(value, "party"));
+        let session_id = decode_string(remove_value(value, "session_id"));
+        let state = decode_string(remove_value(value, "state")).unwrap();
+        let sync_id = decode_string(remove_value(value, "sync_id"));
+        let type_activity = decode_u64(remove_value(value, "type")).unwrap();
+        let timestamp = remove_value(value, "timestamps").clone();
+        let timestamp_end = None;
+        let timestamp_start = None;
+        if timestamp.is_some() {
+            let timestamp_end = decode_string(remove_value(
+                &mut timestamp.clone().unwrap().as_object_mut().unwrap(),
+                "end",
+            ));
+            let timestamp_start = decode_string(remove_value(
+                &mut timestamp.unwrap().as_object_mut().unwrap(),
+                "start",
+            ));
+        }
+        if !value.is_empty() {
+            panic!("value not taken out of PresenceActivity: {:?}", value);
+        }
+        Self {
+            assets,
+            created_at,
+            details,
+            emoji,
+            flags,
+            id,
+            name,
+            party,
+            session_id,
+            state,
+            sync_id,
+            timestamp_end,
+            timestamp_start,
+            type_activity,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PresenceActivityParty {
+    pub id: String,
+}
+
+impl PresenceActivityParty {
+    fn decode(mut value: Option<Value>) -> Option<Self> {
+        let value = value.as_mut()?.as_object_mut()?;
+        let id = decode_string(remove_value(value, "id")).unwrap();
+        if !value.is_empty() {
+            panic!("value not taken out of PresenceActivityParty: {:?}", value);
+        }
+        Some(Self { id })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PresenceActivityAsset {
+    pub large_image: String,
+    pub large_text: String,
+}
+
+impl PresenceActivityAsset {
+    fn decode(mut value: Option<Value>) -> Option<Self> {
+        let value = value.as_mut()?.as_object_mut()?;
+        let large_image = decode_string(remove_value(value, "large_image")).unwrap();
+        let large_text = decode_string(remove_value(value, "large_text")).unwrap();
+        if !value.is_empty() {
+            panic!("value not taken out of PresenceActivityAsset: {:?}", value);
+        }
+        Some(Self {
+            large_image,
+            large_text,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ReadyEvent {
-    // pub version: usize, // missing
-    pub user: CurrentUser,
+    pub presences: Vec<Presence>,
     pub session_id: String,
-    // pub user_settings: Option<UserSettings>,
-    // pub read_state: Option<Vec<ReadState>>,
-    // pub private_channels: Vec<Channel>,
-    // pub presences: Vec<Presence>,
-    pub relationships: Vec<Relationship>,
-    // pub servers: Vec<PossibleServer<LiveServer>>,
-    // pub user_server_settings: Option<Vec<UserServerSettings>>,
-    // pub tutorial: Option<Tutorial>,
-    // pub trace: Vec<Option<String>>, // missing
-    pub notes: BTreeMap<UserId, Option<String>>,
-    pub shard: Option<[u8; 2]>,
+    pub user: CurrentUser,
+    pub v: u64,
+    // pub relationships: Vec<Relationship>,
+    // pub notes: BTreeMap<UserId, Option<String>>,
 }
 
 impl ReadyEvent {
-    pub fn decode(value: Value) -> Result<Self> {
-        let mut shard = None;
-        if value.get("shard").is_some() {
-            shard.insert(ureq::serde_json::from_value(
-                value.get("shard").unwrap().clone(),
-            )?);
+    pub fn decode(mut value: Value) -> Result<Self> {
+        let value = value.as_object_mut().unwrap();
+        // remove_value(value, "_trace");
+        // remove_value(value, "analytics_token");
+        // remove_value(value, "api_code_version");
+        // remove_value(&mut value, "auth");
+        // remove_value(value, "auth_session_id_hash");
+        // remove_value(value, "broadcaster_user_ids");
+        // remove_value(value, "connected_accounts");
+        // remove_value(value, "consents");
+        // remove_value(value, "country_code");
+        // remove_value(value, "experiments");
+        // remove_value(value, "explicit_content_scan_version");
+        // remove_value(value, "friend_suggestion_count");
+        // remove_value(value, "geo_ordered_rtc_regions");
+        // remove_value(value, "guild_experiments");
+        // remove_value(value, "guild_join_requests");
+        // remove_value(value, "guilds");
+        // remove_value(&mut value, "notes");
+        // remove_value(value, "notification_settings");
+        let presences = decode_array(remove_value(value, "presences"), Presence::decode).unwrap();
+        // remove_value(value, "private_channels");
+        // remove_value(value, "read_state");
+        // remove_value(value, "relationships");
+        // remove_value(value, "resume_gateway_url");
+        let session_id = decode_string(remove_value(value, "session_id")).unwrap();
+        // remove_value(value, "session_type");
+        // remove_value(value, "sessions");
+        // remove_value(value, "static_client_session_id");
+        // remove_value(value, "tutorial");
+        let user = CurrentUser::decode(remove_value(value, "user"));
+        // remove_value(value, "user_guild_settings");
+        // remove_value(value, "user_settings");
+        // remove_value(value, "user_settings_proto");
+        let v = decode_u64(remove_value(value, "v")).unwrap();
+
+        if !value.is_empty() {
+            panic!("value not taken out of ReadyEvent: {:?}", value);
         }
         Ok(Self {
-            user: ureq::serde_json::from_value(
-                value
-                    .get("user")
-                    .expect("user not found in ReadyEvent")
-                    .clone(),
-            )?,
-            session_id: ureq::serde_json::from_value(
-                value
-                    .get("session_id")
-                    .expect("session_id not found in ReadyEvent")
-                    .clone(),
-            )?,
-            relationships: ureq::serde_json::from_value(
-                value
-                    .get("relationships")
-                    .expect("relationships not found in ReadyEvent")
-                    .clone(),
-            )?,
-            notes: ureq::serde_json::from_value(value.get("notes").unwrap().clone())?,
-            shard,
+            presences,
+            session_id,
+            user,
+            v,
         })
     }
 }
