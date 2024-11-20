@@ -1,6 +1,6 @@
+#![allow(dead_code)] // TODO :(
+
 use std::{
-    borrow::Cow,
-    collections::BTreeMap,
     io::Read,
     net::TcpStream,
     sync::{Arc, Mutex},
@@ -17,39 +17,96 @@ use ureq::serde_json::{Map, Value};
 
 use super::CDN_URL;
 
-fn remove_value(map: &mut Map<String, Value>, key: &str) -> Option<Value> {
-    map.remove(key)
-}
+#[derive(Debug, Clone)]
+pub struct WrappedMap(Map<String, Value>);
 
-fn decode_string(value: Option<Value>) -> Option<String> {
-    if value.as_ref()?.is_null() {
-        return None;
+impl WrappedMap {
+    fn get(&mut self, key: &str) -> Option<WrappedValue> {
+        let value = self.0.remove(key)?;
+        if value.is_null() {
+            return None;
+        }
+        Some(WrappedValue(value))
     }
-    Some(value?.as_str()?.to_owned())
-}
 
-fn decode_bool(value: Option<Value>) -> Option<bool> {
-    if value.as_ref()?.is_null() {
-        return None;
+    /// type_name is used in the panic message
+    fn check_empty_panic(self, type_name: &str) {
+        if !self.0.is_empty() {
+            panic!("value not taken out of {}: {:?}", type_name, self.0);
+        }
     }
-    Some(value?.as_bool()?)
 }
 
-fn decode_u64(value: Option<Value>) -> Option<u64> {
-    if value.as_ref()?.is_null() {
-        return None;
+#[derive(Debug, Clone)]
+pub struct WrappedValue(Value);
+
+impl WrappedValue {
+    fn to_string(self) -> Result<String> {
+        if !self.0.is_string() {
+            return Err(Error::msg(format!(
+                "{:?} is not a string",
+                self.0.to_string()
+            )));
+        }
+        Ok(self.0.as_str().unwrap().to_string())
     }
-    Some(value?.as_u64()?)
-}
 
-fn decode_array<T, F: Fn(Value) -> T>(value: Option<Value>, f: F) -> Option<Vec<T>> {
-    Some(
-        value?
-            .as_array()?
+    fn to_bool(self) -> Result<bool> {
+        if !self.0.is_boolean() {
+            return Err(Error::msg(format!(
+                "{:?} is not a bool",
+                self.0.to_string()
+            )));
+        }
+        Ok(self.0.as_bool().unwrap())
+    }
+
+    fn to_u64(self) -> Result<u64> {
+        if !self.0.is_u64() {
+            return Err(Error::msg(format!("{:?} is not a u64", self.0.to_string())));
+        }
+        Ok(self.0.as_u64().unwrap())
+    }
+
+    fn to_decoder<T, F: FnOnce(WrappedMap) -> Result<T>>(self, decode: F) -> Result<T> {
+        if !self.0.is_object() {
+            return Err(Error::msg(format!(
+                "{:?} is not an object",
+                self.0.to_string()
+            )));
+        }
+        decode(self.to_map()?)
+    }
+
+    fn to_value_decoder<T, F: FnOnce(WrappedValue) -> Result<T>>(self, decode: F) -> Result<T> {
+        decode(self)
+    }
+
+    fn to_map(self) -> Result<WrappedMap> {
+        if !self.0.is_object() {
+            return Err(Error::msg(format!(
+                "{:?} is not an object",
+                self.0.to_string()
+            )));
+        }
+        Ok(WrappedMap(self.0.as_object().unwrap().clone()))
+    }
+
+    fn to_array(self) -> Result<Vec<WrappedValue>> {
+        if !self.0.is_array() {
+            return Err(Error::msg(format!(
+                "{:?} is not an array",
+                self.0.to_string()
+            )));
+        }
+        Ok(self
+            .0
+            .as_array()
+            .unwrap()
             .iter()
-            .map(|x| f(x.clone()))
-            .collect::<Vec<_>>(),
-    )
+            .map(|x| WrappedValue(x.clone()))
+            .collect())
+    }
 }
 
 pub struct Mention {
@@ -71,8 +128,8 @@ pub struct UserId(
 );
 
 impl UserId {
-    fn decode(value: Option<Value>) -> Result<Self> {
-        Ok(Self(decode_string(value).unwrap().parse()?))
+    fn decode(value: WrappedValue) -> Result<Self> {
+        Ok(Self(value.to_string()?.parse::<usize>()?))
     }
 
     #[inline(always)]
@@ -88,6 +145,10 @@ impl UserId {
 pub struct ChannelId(pub usize);
 
 impl ChannelId {
+    fn decode(value: WrappedValue) -> Result<Self> {
+        Ok(Self(value.to_string()?.parse::<usize>()?))
+    }
+
     #[inline(always)]
     pub fn mention(&self) -> Mention {
         Mention {
@@ -100,10 +161,20 @@ impl ChannelId {
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
 pub struct ApplicationId(pub usize);
 
+impl ApplicationId {
+    fn decode(value: WrappedValue) -> Result<Self> {
+        Ok(Self(value.to_string()?.parse::<usize>()?))
+    }
+}
+
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
 pub struct ServerId(pub usize);
 
 impl ServerId {
+    fn decode(value: WrappedValue) -> Result<Self> {
+        Ok(Self(value.to_string()?.parse::<usize>()?))
+    }
+
     pub fn everyone(self) -> RoleId {
         RoleId(self.0)
     }
@@ -112,10 +183,20 @@ impl ServerId {
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
 pub struct MessageId(pub usize);
 
+impl MessageId {
+    fn decode(value: WrappedValue) -> Result<Self> {
+        Ok(Self(value.to_string()?.parse::<usize>()?))
+    }
+}
+
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
 pub struct RoleId(pub usize);
 
 impl RoleId {
+    fn decode(value: WrappedValue) -> Result<Self> {
+        Ok(Self(value.to_string()?.parse::<usize>()?))
+    }
+
     #[inline(always)]
     pub fn mention(&self) -> Mention {
         Mention {
@@ -127,6 +208,12 @@ impl RoleId {
 
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct EmojiId(pub usize);
+
+impl EmojiId {
+    fn decode(value: WrappedValue) -> Result<Self> {
+        Ok(Self(value.to_string()?.parse::<usize>()?))
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Emoji(pub String);
@@ -146,6 +233,27 @@ pub enum ChannelType {
     StageVoice,
     Directory,
     Forum,
+}
+
+impl ChannelType {
+    fn decode(value: WrappedValue) -> Result<Self> {
+        Ok(match value.to_u64()? {
+            0 => ChannelType::Text,
+            1 => ChannelType::Private,
+            2 => ChannelType::Voice,
+            3 => ChannelType::Group,
+            4 => ChannelType::Category,
+            5 => ChannelType::News,
+            6 => ChannelType::Store,
+            10 => ChannelType::NewsThread,
+            11 => ChannelType::PublicThread,
+            12 => ChannelType::PrivateThread,
+            13 => ChannelType::StageVoice,
+            14 => ChannelType::Directory,
+            15 => ChannelType::Forum,
+            other => panic!("unknown channel type {:?}", other),
+        })
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -225,7 +333,7 @@ pub struct Ban {
 #[derive(Deserialize, Debug, Clone)]
 pub struct User {
     pub avatar: String,
-    pub avatar_decoration_data: Option<String>, // TODO
+    pub avatar_decoration_data: Option<String>,
     pub clan: Option<String>,
     pub discriminator: u16,
     pub global_name: Option<String>,
@@ -235,25 +343,30 @@ pub struct User {
 }
 
 impl User {
-    fn decode(mut value: Option<Value>) -> Self {
-        let value = value.as_mut().unwrap().as_object_mut().unwrap();
-        let avatar = decode_string(remove_value(value, "avatar")).unwrap();
-        let avatar_decoration_data = decode_string(remove_value(value, "avatar_decoration_data"));
-        let clan = decode_string(remove_value(value, "clan"));
-        let discriminator = remove_value(value, "discriminator")
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        let avatar = map.get("avatar").unwrap().to_string()?;
+        let avatar_decoration_data = map
+            .get("avatar_decoration_data")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let clan = map
+            .get("clan")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let discriminator = map
+            .get("discriminator")
             .unwrap()
-            .as_str()
-            .unwrap()
-            .parse::<u16>()
-            .unwrap();
-        let global_name = decode_string(remove_value(value, "global_name"));
-        let id = UserId::decode(remove_value(value, "id")).unwrap();
-        let public_flags = decode_u64(remove_value(value, "public_flags")).unwrap();
-        let username = decode_string(remove_value(value, "username")).unwrap();
-        if !value.is_empty() {
-            panic!("value not taken out of User: {:?}", value);
-        }
-        Self {
+            .to_string()?
+            .parse::<u16>()?;
+        let global_name = map
+            .get("global_name")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let id = map.get("id").unwrap().to_value_decoder(UserId::decode)?;
+        let public_flags = map.get("public_flags").unwrap().to_u64()?;
+        let username = map.get("username").unwrap().to_string()?;
+        map.check_empty_panic("User");
+        Ok(Self {
             avatar,
             avatar_decoration_data,
             clan,
@@ -262,19 +375,20 @@ impl User {
             id,
             public_flags,
             username,
-        }
+        })
     }
 
-    // #[inline(always)]
-    // pub fn mention(&self) -> Mention {
-    //     self.id.mention()
-    // }
+    #[inline(always)]
+    pub fn mention(&self) -> Mention {
+        self.id.mention()
+    }
 
-    // pub fn avatar_url(&self) -> Option<String> {
-    //     self.avatar
-    //         .as_ref()
-    //         .map(|x| format!("{}/avatars/{}/{}.jpg", CDN_URL, self.id.0, x))
-    // }
+    pub fn avatar_url(&self) -> Option<String> {
+        Some(format!(
+            "{}/avatars/{}/{}.jpg",
+            CDN_URL, self.id.0, self.avatar
+        ))
+    }
 }
 
 pub struct Member {
@@ -307,61 +421,102 @@ pub enum Channel {
 }
 
 impl Channel {
-    pub fn decode(value: ureq::serde_json::Value) -> Result<Channel> {
-        match value
-            .get("type")
-            .and_then(|x| x.as_u64())
-            .expect("channel doesnt contain a type")
-        {
-            // 0 | 2 => Public
-            // 1 => Private
-            // 3 => Group
-            4 => Ok(Channel::Category(ureq::serde_json::from_value::<
-                ChannelCategory,
-            >(value)?)),
-            5 => Ok(Channel::News),
-            6 => Ok(Channel::Store),
-            other => panic!("unexpected channel type {:?}", other),
-        }
+    pub fn decode(mut map: WrappedMap) -> Result<Self> {
+        Ok(
+            match map
+                .get("type")
+                .unwrap()
+                .to_value_decoder(ChannelType::decode)?
+            {
+                ChannelType::Private => Channel::Private(PrivateChannel::decode(map)?),
+                ChannelType::Group => Channel::Group(Group::decode(map)?),
+                other => todo!("{:?}", other),
+            },
+        )
     }
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Group {
-    #[serde(rename = "id")]
-    pub channel_id: ChannelId,
+    pub blocked_user_warning_dismissed: bool,
+    pub flags: u64,
     pub icon: Option<String>,
-    pub last_message_id: Option<MessageId>,
-    pub last_pin_timestamp: Option<DateTime<FixedOffset>>,
+    pub id: ChannelId,
+    pub last_message_id: MessageId,
     pub name: Option<String>,
     pub owner_id: UserId,
-    #[serde(default)]
+    pub recipient_flags: u64,
     pub recipients: Vec<User>,
 }
 
 impl Group {
-    // pub fn name(&self) -> Cow<str> {
-    //     match self.name {
-    //         Some(ref name) => Cow::Borrowed(name),
-    //         None => {
-    //             if self.recipients.is_empty() {
-    //                 return Cow::Borrowed("Empty Group");
-    //             }
-    //             Cow::Owned(
-    //                 self.recipients
-    //                     .iter()
-    //                     .map(|x| x.username.clone())
-    //                     .collect::<Vec<String>>()
-    //                     .join(", "),
-    //             )
-    //         }
-    //     }
-    // }
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        let blocked_user_warning_dismissed = map
+            .get("blocked_user_warning_dismissed")
+            .unwrap()
+            .to_bool()?;
+        let flags = map.get("flags").unwrap().to_u64()?;
+        let icon = map
+            .get("icon")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let id = map.get("id").unwrap().to_value_decoder(ChannelId::decode)?;
+        let last_message_id = map
+            .get("last_message_id")
+            .unwrap()
+            .to_value_decoder(MessageId::decode)?;
+        let name = map
+            .get("name")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let owner_id = map
+            .get("owner_id")
+            .unwrap()
+            .to_value_decoder(UserId::decode)?;
+        let recipient_flags = map.get("recipient_flags").unwrap().to_u64()?;
+        let recipients = map
+            .get("recipients")
+            .unwrap()
+            .to_array()?
+            .into_iter()
+            .map(|x| x.to_decoder(User::decode))
+            .collect::<Result<Vec<_>>>()?;
+        map.check_empty_panic("Group");
+        Ok(Self {
+            blocked_user_warning_dismissed,
+            flags,
+            icon,
+            id,
+            last_message_id,
+            name,
+            owner_id,
+            recipient_flags,
+            recipients,
+        })
+    }
+
+    pub fn name(&self) -> std::borrow::Cow<str> {
+        match self.name {
+            Some(ref name) => std::borrow::Cow::Borrowed(name),
+            None => {
+                if self.recipients.is_empty() {
+                    return std::borrow::Cow::Borrowed("Empty Group");
+                }
+                std::borrow::Cow::Owned(
+                    self.recipients
+                        .iter()
+                        .map(|x| x.username.clone())
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                )
+            }
+        }
+    }
 
     pub fn icon_url(&self) -> Option<String> {
         self.icon
             .as_ref()
-            .map(|x| format!("{}/channel-icons/{}/{}.jpg", CDN_URL, self.channel_id.0, x))
+            .map(|x| format!("{}/channel-icons/{}/{}.jpg", CDN_URL, self.id.0, x))
     }
 }
 
@@ -377,67 +532,58 @@ pub struct Call {
 
 #[derive(Debug, Clone)]
 pub struct PrivateChannel {
+    pub flags: u64,
     pub id: ChannelId,
-    pub channel_type: ChannelType,
+    pub is_message_request: bool,
+    pub is_message_request_timestamp: Option<String>,
+    pub is_spam: bool,
+    pub last_message_id: MessageId,
+    pub recipient_flags: u64,
     pub recipient: User,
-    pub last_message_id: Option<MessageId>,
-    pub owner_id: Option<UserId>,
-    pub application_id: Option<ApplicationId>,
-    pub last_pin_timestamp: Option<DateTime<FixedOffset>>,
+    pub safety_warnings: Vec<String>,
 }
 
 impl PrivateChannel {
-    pub fn decode(value: ureq::serde_json::Value) -> Result<Self> {
-        let mut recipients = ureq::serde_json::from_value::<Vec<User>>(
-            value
-                .get("recipients")
-                .expect("recipients value not found")
-                .clone(),
-        )?;
-        if recipients.len() != 1 {
-            panic!("expected 1 recipient, found {:?}", recipients);
-        }
-        let id = ChannelId(
-            value
-                .get("id")
-                .expect("unable to find id")
-                .as_u64()
-                .expect("unable to parse id") as usize,
-        );
-        let channel_type = ureq::serde_json::from_value::<ChannelType>(
-            value.get("type").expect("unable to find type").clone(),
-        )?;
-        let mut last_message_id = None;
-        if let Some(message_id) = value.get("last_message_id") {
-            last_message_id = Some(MessageId(
-                message_id.as_u64().expect("unable to parse id") as usize
-            ));
-        }
-        let mut owner_id = None;
-        if let Some(id) = value.get("owner_id") {
-            owner_id = Some(UserId(id.as_u64().expect("unable to parse id") as usize));
-        }
-        let mut application_id = None;
-        if let Some(id) = value.get("application_id") {
-            application_id = Some(ApplicationId(
-                id.as_u64().expect("unable to parse id") as usize
-            ));
-        }
-        let mut last_pin_timestamp = None;
-        if let Some(timestamp) = value.get("last_pin_timestamp") {
-            last_pin_timestamp = Some(DateTime::parse_from_rfc3339(
-                timestamp.as_str().expect("unable to parse timestamp"),
-            )?);
-        }
-
-        Ok(PrivateChannel {
+    pub fn decode(mut map: WrappedMap) -> Result<Self> {
+        let flags = map.get("flags").unwrap().to_u64()?;
+        let id = map.get("id").unwrap().to_value_decoder(ChannelId::decode)?;
+        let is_message_request = map.get("is_message_request").unwrap().to_bool()?;
+        let is_message_request_timestamp = map
+            .get("is_message_request_timestamp")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let is_spam = map.get("is_spam").unwrap().to_bool()?;
+        let last_message_id = map
+            .get("last_message_id")
+            .unwrap()
+            .to_value_decoder(MessageId::decode)?;
+        let recipient_flags = map.get("recipient_flags").unwrap().to_u64()?;
+        let recipient = map
+            .get("recipients")
+            .unwrap()
+            .to_array()?
+            .first()
+            .unwrap()
+            .clone() // TODO
+            .to_decoder(User::decode)?;
+        let safety_warnings = map
+            .get("safety_warnings")
+            .unwrap()
+            .to_array()?
+            .into_iter()
+            .map(|x| x.to_string())
+            .collect::<Result<Vec<_>>>()?;
+        map.check_empty_panic("PrivateChannel");
+        Ok(Self {
+            flags,
             id,
-            channel_type,
-            recipient: recipients.remove(0),
+            is_message_request,
+            is_message_request_timestamp,
+            is_spam,
             last_message_id,
-            owner_id,
-            application_id,
-            last_pin_timestamp,
+            recipient_flags,
+            recipient,
+            safety_warnings,
         })
     }
 }
@@ -550,13 +696,13 @@ impl<'de> Visitor<'de> for PermissionOverwriteVisitor {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct CurrentUser {
-    pub accent_color: Option<String>, // TODO idk what type
-    pub avatar: Option<String>,
-    pub avatar_decoration_data: Option<String>, // TODO
-    pub banner: Option<String>,                 // TODO
-    pub banner_color: Option<String>,           // TODO
+    pub accent_color: Option<String>,
+    pub avatar: String,
+    pub avatar_decoration_data: Option<String>,
+    pub banner: Option<String>,
+    pub banner_color: Option<String>,
     pub bio: String,
-    pub clan: Option<String>, // TODO
+    pub clan: Option<String>,
     pub desktop: bool,
     pub discriminator: u16,
     pub email: String,
@@ -576,52 +722,51 @@ pub struct CurrentUser {
 }
 
 impl CurrentUser {
-    fn decode(mut value: Option<Value>) -> Self {
-        let value = value.as_mut().unwrap().as_object_mut().unwrap();
-        let accent_color = decode_string(remove_value(value, "accent_color"));
-        let avatar = decode_string(remove_value(value, "avatar"));
-        let avatar_decoration_data = decode_string(remove_value(value, "avatar_decoration_data"));
-        let banner = decode_string(remove_value(value, "banner"));
-        let banner_color = decode_string(remove_value(value, "banner_color"));
-        let bio = decode_string(remove_value(value, "bio")).unwrap();
-        let clan = decode_string(remove_value(value, "clan"));
-        let desktop = remove_value(value, "desktop").unwrap().as_bool().unwrap();
-        let discriminator = remove_value(value, "discriminator")
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        let accent_color = map
+            .get("accent_color")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let avatar = map.get("avatar").unwrap().to_string()?;
+        let avatar_decoration_data = map
+            .get("avatar_decoration_data")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let banner = map
+            .get("banner")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let banner_color = map
+            .get("banner_color")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let bio = map.get("bio").unwrap().to_string()?;
+        let clan = map
+            .get("clan")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
+        let desktop = map.get("desktop").unwrap().to_bool()?;
+        let discriminator = map
+            .get("discriminator")
             .unwrap()
-            .as_str()
-            .unwrap()
-            .parse::<u16>()
-            .unwrap();
-        let email = decode_string(remove_value(value, "email")).unwrap();
-        let flags = remove_value(value, "flags").unwrap().as_u64().unwrap();
-        let global_name = decode_string(remove_value(value, "global_name")).unwrap();
-        let id = UserId::decode(remove_value(value, "id")).unwrap();
-        let mfa_enabled = remove_value(value, "mfa_enabled")
-            .unwrap()
-            .as_bool()
-            .unwrap();
-        let mobile = remove_value(value, "mobile").unwrap().as_bool().unwrap();
-        let nsfw_allowed = remove_value(value, "nsfw_allowed")
-            .unwrap()
-            .as_bool()
-            .unwrap();
-        let phone = decode_string(remove_value(value, "phone")).unwrap();
-        let premium = remove_value(value, "premium").unwrap().as_bool().unwrap();
-        let premium_type = remove_value(value, "premium_type")
-            .unwrap()
-            .as_u64()
-            .unwrap();
-        let pronouns = decode_string(remove_value(value, "pronouns")).unwrap();
-        let purchased_flags = remove_value(value, "purchased_flags")
-            .unwrap()
-            .as_u64()
-            .unwrap();
-        let username = decode_string(remove_value(value, "username")).unwrap();
-        let verified = remove_value(value, "verified").unwrap().as_bool().unwrap();
-        if !value.is_empty() {
-            panic!("value not taken out of CurrentUser: {:?}", value);
-        }
-        Self {
+            .to_string()?
+            .parse::<u16>()?;
+        let email = map.get("email").unwrap().to_string()?;
+        let flags = map.get("flags").unwrap().to_u64()?;
+        let global_name = map.get("global_name").unwrap().to_string()?;
+        let id = map.get("id").unwrap().to_value_decoder(UserId::decode)?;
+        let mfa_enabled = map.get("mfa_enabled").unwrap().to_bool()?;
+        let mobile = map.get("mobile").unwrap().to_bool()?;
+        let nsfw_allowed = map.get("nsfw_allowed").unwrap().to_bool()?;
+        let phone = map.get("phone").unwrap().to_string()?;
+        let premium = map.get("premium").unwrap().to_bool()?;
+        let premium_type = map.get("premium_type").unwrap().to_u64()?;
+        let pronouns = map.get("pronouns").unwrap().to_string()?;
+        let purchased_flags = map.get("purchased_flags").unwrap().to_u64()?;
+        let username = map.get("username").unwrap().to_string()?;
+        let verified = map.get("verified").unwrap().to_bool()?;
+        map.check_empty_panic("CurrentUser");
+        Ok(Self {
             accent_color,
             avatar,
             avatar_decoration_data,
@@ -645,56 +790,84 @@ impl CurrentUser {
             purchased_flags,
             username,
             verified,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Relationship {
+    // pub id: UserId,
+    // pub is_spam_request: bool,
+    // pub nickname: Option<String>,
+    // pub since: String,
+    // pub type_relationship: RelationshipType,
+    // pub user: User,
+    // pub user_ignored: bool,
+}
+
+impl Relationship {
+    fn decode(mut map: WrappedMap) -> Self {
+        // let id = UserId::decode(remove_value(value, "id")).unwrap();
+        // let is_spam_request = decode_bool(remove_value(value, "is_spam_request")).unwrap();
+        // let nickname = decode_string(remove_value(value, "nickname"));
+        // let since = decode_string(remove_value(value, "since")).unwrap();
+        // let type_relationship = match decode_u64(remove_value(value, "type")).unwrap() {
+        //     0 => RelationshipType::Ignored,
+        //     1 => RelationshipType::Friends,
+        //     2 => RelationshipType::Blocked,
+        //     3 => RelationshipType::IncomingRequest,
+        //     4 => RelationshipType::OutgoingRequest,
+        //     other => panic!("unknown type, {:?}", other),
+        // };
+        // let user = User::decode(remove_value(value, "user"));
+        // let user_ignored = decode_bool(remove_value(value, "user_ignored")).unwrap();
+        map.check_empty_panic("Relationship");
+        Self {
+            // id,
+            // is_spam_request,
+            // nickname,
+            // since,
+            // type_relationship,
+            // user,
+            // user_ignored,
         }
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
-pub struct Relationship {
-    pub id: UserId,
-    #[serde(rename = "type")]
-    pub relationship_type: RelationshipType,
-    pub user: User,
-    pub is_spam_request: bool,
-    pub nickname: Option<String>, // TODO
-    pub since: String,
-    pub user_ignored: bool,
+#[derive(Debug, Clone)]
+pub enum RelationshipType {
+    Ignored,
+    Friends,
+    Blocked,
+    IncomingRequest,
+    OutgoingRequest,
 }
-
-serde_aux::enum_number_declare!(pub RelationshipType {
-    Ignored = 0,
-    Friends = 1,
-    Blocked = 2,
-    IncomingRequest = 3,
-    OutgoingRequest = 4,
-});
 
 #[derive(Debug, Clone)]
 pub struct Presence {
-    pub activities: Vec<PresenceActivity>,
-    pub client_status: PresenceClientStatus,
-    pub last_modified: u64,
-    pub status: Status,
+    // pub activities: Vec<PresenceActivity>,
+    // pub client_status: PresenceClientStatus,
+    // pub last_modified: u64,
+    // pub status: Status,
+    // pub user: User,
 }
 
 impl Presence {
-    fn decode(mut value: Value) -> Self {
-        let value = value.as_object_mut().unwrap();
-        let activities =
-            decode_array(remove_value(value, "activities"), PresenceActivity::decode).unwrap();
-        let client_status = PresenceClientStatus::decode(remove_value(value, "client_status"));
-        let last_modified = decode_u64(remove_value(value, "last_modified")).unwrap();
-        let status = Status::decode(remove_value(value, "status")).unwrap();
-        let user = User::decode(remove_value(value, "user"));
-        if !value.is_empty() {
-            panic!("value not taken out of Presence: {:?}", value);
-        }
-        Self {
-            activities,
-            client_status,
-            last_modified,
-            status,
-        }
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        // let activities =
+        //     decode_array(remove_value(value, "activities"), PresenceActivity::decode).unwrap();
+        // let client_status = PresenceClientStatus::decode(remove_value(value, "client_status"));
+        // let last_modified = decode_u64(remove_value(value, "last_modified")).unwrap();
+        // let status = Status::decode(remove_value(value, "status")).unwrap();
+        // let user = User::decode(remove_value(value, "user"));
+        map.check_empty_panic("Presence");
+        Ok(Self {
+            // activities,
+            // client_status,
+            // last_modified,
+            // status,
+            // user,
+        })
     }
 }
 
@@ -704,8 +877,8 @@ pub enum Status {
 }
 
 impl Status {
-    fn decode(value: Option<Value>) -> Option<Self> {
-        Some(match decode_string(value)?.as_str() {
+    fn decode(value: WrappedValue) -> Result<Self> {
+        Ok(match value.to_string()?.as_str() {
             "dnd" => Status::DND,
             other => panic!("unknown status: {:?}", other),
         })
@@ -714,180 +887,182 @@ impl Status {
 
 #[derive(Debug, Clone)]
 pub struct PresenceClientStatus {
-    pub desktop: Status,
-    pub mobile: Option<Status>,
+    // pub desktop: Status,
+    // pub mobile: Option<Status>,
 }
 
 impl PresenceClientStatus {
-    fn decode(mut value: Option<Value>) -> Self {
-        let value = value.as_mut().unwrap().as_object_mut().unwrap();
-        let desktop = Status::decode(remove_value(value, "desktop")).unwrap();
-        let mobile = Status::decode(remove_value(value, "mobile"));
-        if !value.is_empty() {
-            panic!("value not taken out of PresenceClientStatus: {:?}", value);
-        }
-        Self { desktop, mobile }
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        // let desktop = Status::decode(remove_value(value, "desktop")).unwrap();
+        // let mobile = Status::decode(remove_value(value, "mobile"));
+        map.check_empty_panic("PresenceClientStatus");
+        Ok(Self {
+            // desktop, mobile
+        })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct PresenceActivity {
-    pub assets: Option<PresenceActivityAsset>,
-    pub created_at: u64,
-    pub details: Option<String>,
-    pub emoji: Option<Emoji>,
-    pub flags: Option<u64>,
-    pub id: String,
-    pub name: String,
-    pub party: Option<PresenceActivityParty>,
-    pub session_id: Option<String>,
-    pub state: String,
-    pub sync_id: Option<String>,
-    pub timestamp_end: Option<String>,
-    pub timestamp_start: Option<String>,
-    pub type_activity: u64,
+    // pub assets: Option<PresenceActivityAsset>,
+    // pub created_at: u64,
+    // pub details: Option<String>,
+    // pub emoji: Option<Emoji>,
+    // pub flags: Option<u64>,
+    // pub id: String,
+    // pub name: String,
+    // pub party: Option<PresenceActivityParty>,
+    // pub session_id: Option<String>,
+    // pub state: String,
+    // pub sync_id: Option<String>,
+    // pub timestamp_end: Option<String>,
+    // pub timestamp_start: Option<String>,
+    // pub type_activity: u64,
 }
 
 impl PresenceActivity {
-    fn decode(mut value: Value) -> Self {
-        let value = value.as_object_mut().unwrap();
-        let assets = PresenceActivityAsset::decode(remove_value(value, "assets"));
-        let created_at = decode_u64(remove_value(value, "created_at")).unwrap();
-        let details = decode_string(remove_value(value, "details"));
-        let emoji = None;
-        remove_value(value, "emoji"); // TODO
-        let flags = decode_u64(remove_value(value, "flags"));
-        let id = decode_string(remove_value(value, "id")).unwrap();
-        let name = decode_string(remove_value(value, "name")).unwrap();
-        let party = PresenceActivityParty::decode(remove_value(value, "party"));
-        let session_id = decode_string(remove_value(value, "session_id"));
-        let state = decode_string(remove_value(value, "state")).unwrap();
-        let sync_id = decode_string(remove_value(value, "sync_id"));
-        let type_activity = decode_u64(remove_value(value, "type")).unwrap();
-        let timestamp = remove_value(value, "timestamps").clone();
-        let timestamp_end = None;
-        let timestamp_start = None;
-        if timestamp.is_some() {
-            let timestamp_end = decode_string(remove_value(
-                &mut timestamp.clone().unwrap().as_object_mut().unwrap(),
-                "end",
-            ));
-            let timestamp_start = decode_string(remove_value(
-                &mut timestamp.unwrap().as_object_mut().unwrap(),
-                "start",
-            ));
-        }
-        if !value.is_empty() {
-            panic!("value not taken out of PresenceActivity: {:?}", value);
-        }
-        Self {
-            assets,
-            created_at,
-            details,
-            emoji,
-            flags,
-            id,
-            name,
-            party,
-            session_id,
-            state,
-            sync_id,
-            timestamp_end,
-            timestamp_start,
-            type_activity,
-        }
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        // let assets = PresenceActivityAsset::decode(remove_value(value, "assets"));
+        // let created_at = decode_u64(remove_value(value, "created_at")).unwrap();
+        // let details = decode_string(remove_value(value, "details"));
+        // let emoji = None;
+        // remove_value(value, "emoji"); // TODO
+        // let flags = decode_u64(remove_value(value, "flags"));
+        // let id = decode_string(remove_value(value, "id")).unwrap();
+        // let name = decode_string(remove_value(value, "name")).unwrap();
+        // let party = PresenceActivityParty::decode(remove_value(value, "party"));
+        // let session_id = decode_string(remove_value(value, "session_id"));
+        // let state = decode_string(remove_value(value, "state")).unwrap();
+        // let sync_id = decode_string(remove_value(value, "sync_id"));
+        // let type_activity = decode_u64(remove_value(value, "type")).unwrap();
+        // let timestamp = remove_value(value, "timestamps").clone();
+        // let mut timestamp_end = None;
+        // let mut timestamp_start = None;
+        // if timestamp.is_some() {
+        //     timestamp_end = decode_string(remove_value(
+        //         &mut timestamp.clone().unwrap().as_object_mut().unwrap(),
+        //         "end",
+        //     ));
+        //     timestamp_start = decode_string(remove_value(
+        //         &mut timestamp.unwrap().as_object_mut().unwrap(),
+        //         "start",
+        //     ));
+        // }
+        map.check_empty_panic("PresenceActivity");
+        Ok(Self {
+            // assets,
+            // created_at,
+            // details,
+            // emoji,
+            // flags,
+            // id,
+            // name,
+            // party,
+            // session_id,
+            // state,
+            // sync_id,
+            // timestamp_end,
+            // timestamp_start,
+            // type_activity,
+        })
     }
 }
 
 #[derive(Debug, Clone)]
 struct PresenceActivityParty {
-    pub id: String,
+    // pub id: String,
 }
 
 impl PresenceActivityParty {
-    fn decode(mut value: Option<Value>) -> Option<Self> {
-        let value = value.as_mut()?.as_object_mut()?;
-        let id = decode_string(remove_value(value, "id")).unwrap();
-        if !value.is_empty() {
-            panic!("value not taken out of PresenceActivityParty: {:?}", value);
-        }
-        Some(Self { id })
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        // let id = decode_string(remove_value(value, "id")).unwrap();
+        map.check_empty_panic("PresenceActivityParty");
+        Ok(Self {
+            // id
+        })
     }
 }
 
 #[derive(Debug, Clone)]
 struct PresenceActivityAsset {
-    pub large_image: String,
-    pub large_text: String,
+    // pub large_image: String,
+    // pub large_text: String,
 }
 
 impl PresenceActivityAsset {
-    fn decode(mut value: Option<Value>) -> Option<Self> {
-        let value = value.as_mut()?.as_object_mut()?;
-        let large_image = decode_string(remove_value(value, "large_image")).unwrap();
-        let large_text = decode_string(remove_value(value, "large_text")).unwrap();
-        if !value.is_empty() {
-            panic!("value not taken out of PresenceActivityAsset: {:?}", value);
-        }
-        Some(Self {
-            large_image,
-            large_text,
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        // let large_image = decode_string(remove_value(value, "large_image")).unwrap();
+        // let large_text = decode_string(remove_value(value, "large_text")).unwrap();
+        map.check_empty_panic("PresenceActivityAsset");
+        Ok(Self {
+            // large_image,
+            // large_text,
         })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ReadyEvent {
-    pub presences: Vec<Presence>,
+    // pub presences: Vec<Presence>,
+    pub private_channels: Vec<Channel>,
+    // pub relationships: Vec<Relationship>,
     pub session_id: String,
     pub user: CurrentUser,
     pub v: u64,
-    // pub relationships: Vec<Relationship>,
-    // pub notes: BTreeMap<UserId, Option<String>>,
 }
 
 impl ReadyEvent {
-    pub fn decode(mut value: Value) -> Result<Self> {
-        let value = value.as_object_mut().unwrap();
-        // remove_value(value, "_trace");
-        // remove_value(value, "analytics_token");
-        // remove_value(value, "api_code_version");
-        // remove_value(&mut value, "auth");
-        // remove_value(value, "auth_session_id_hash");
-        // remove_value(value, "broadcaster_user_ids");
-        // remove_value(value, "connected_accounts");
-        // remove_value(value, "consents");
-        // remove_value(value, "country_code");
-        // remove_value(value, "experiments");
-        // remove_value(value, "explicit_content_scan_version");
-        // remove_value(value, "friend_suggestion_count");
-        // remove_value(value, "geo_ordered_rtc_regions");
-        // remove_value(value, "guild_experiments");
-        // remove_value(value, "guild_join_requests");
-        // remove_value(value, "guilds");
-        // remove_value(&mut value, "notes");
-        // remove_value(value, "notification_settings");
-        let presences = decode_array(remove_value(value, "presences"), Presence::decode).unwrap();
-        // remove_value(value, "private_channels");
-        // remove_value(value, "read_state");
-        // remove_value(value, "relationships");
-        // remove_value(value, "resume_gateway_url");
-        let session_id = decode_string(remove_value(value, "session_id")).unwrap();
-        // remove_value(value, "session_type");
-        // remove_value(value, "sessions");
-        // remove_value(value, "static_client_session_id");
-        // remove_value(value, "tutorial");
-        let user = CurrentUser::decode(remove_value(value, "user"));
-        // remove_value(value, "user_guild_settings");
-        // remove_value(value, "user_settings");
-        // remove_value(value, "user_settings_proto");
-        let v = decode_u64(remove_value(value, "v")).unwrap();
-
-        if !value.is_empty() {
-            panic!("value not taken out of ReadyEvent: {:?}", value);
-        }
+    pub fn decode(mut map: WrappedMap) -> Result<Self> {
+        map.get("_trace");
+        map.get("analytics_token");
+        map.get("api_code_version");
+        map.get("auth");
+        map.get("auth_session_id_hash");
+        map.get("broadcaster_user_ids");
+        map.get("connected_accounts");
+        map.get("consents");
+        map.get("country_code");
+        map.get("experiments");
+        map.get("explicit_content_scan_version");
+        map.get("friend_suggestion_count");
+        map.get("game_relationships");
+        map.get("geo_ordered_rtc_regions");
+        map.get("guild_experiments");
+        map.get("guild_join_requests");
+        map.get("guilds");
+        map.get("notes");
+        map.get("notification_settings");
+        // let presences = decode_array(remove_value(value, "presences"), Presence::decode).unwrap();
+        map.get("presences");
+        // let private_channels =
+        //     decode_array(remove_value(value, "private_channels"), Channel::decode)?;
+        let private_channels = map
+            .get("private_channels")
+            .unwrap()
+            .to_array()?
+            .into_iter()
+            .map(|x| x.to_decoder(Channel::decode))
+            .collect::<Result<Vec<_>>>()?;
+        map.get("read_state");
+        // let relationships =
+        // decode_array(remove_value(value, "relationships"), Relationship::decode).unwrap();
+        map.get("relationships");
+        map.get("resume_gateway_url");
+        let session_id = map.get("session_id").unwrap().to_string()?;
+        map.get("session_type");
+        map.get("sessions");
+        map.get("static_client_session_id");
+        map.get("tutorial");
+        let user = map.get("user").unwrap().to_decoder(CurrentUser::decode)?;
+        map.get("user_guild_settings");
+        map.get("user_settings");
+        map.get("user_settings_proto");
+        let v = map.get("v").unwrap().to_u64()?;
+        map.check_empty_panic("ReadyEvent");
         Ok(Self {
-            presences,
+            // presences,
+            private_channels,
+            // relationships,
             session_id,
             user,
             v,
@@ -898,13 +1073,13 @@ impl ReadyEvent {
 #[derive(Debug)]
 pub enum Event {
     Ready(ReadyEvent),
-    Unknown(String, Value),
+    Unknown(String, WrappedValue),
 }
 
 impl Event {
-    pub fn decode(kind: &str, value: Value) -> Result<Self> {
+    pub fn decode(kind: &str, value: WrappedValue) -> Result<Self> {
         match kind {
-            "READY" => Ok(Event::Ready(ReadyEvent::decode(value)?)),
+            "READY" => Ok(Event::Ready(value.to_decoder(ReadyEvent::decode)?)),
             _ => {
                 println!("unknown event: {:?}", kind);
                 Ok(Event::Unknown(kind.to_string(), value))
@@ -924,47 +1099,47 @@ pub enum GatewayEvent {
 }
 
 impl GatewayEvent {
-    pub fn decode(value: Value) -> Result<Self> {
-        Ok(match value.get("op").and_then(|x| x.as_u64()) {
-            Some(0) => GatewayEvent::Dispatch(
-                value
-                    .get("s")
-                    .expect("s not found in websocket message")
-                    .as_u64()
-                    .expect("unable to convert websocket message to u64") as usize,
-                Event::decode(
-                    value
-                        .get("t")
-                        .expect("t not found in websocket message")
-                        .as_str()
-                        .expect("could not convert to a string"),
-                    value
-                        .get("d")
+    pub fn decode(mut map: WrappedMap) -> Result<Self> {
+        Ok(
+            match map.get("op").expect("op is null in GatewayEvent").to_u64() {
+                Ok(0) => GatewayEvent::Dispatch(
+                    map.get("s")
+                        .expect("s not found in websocket message")
+                        .to_u64()
+                        .expect("unable to convert websocket message to u64")
+                        as usize,
+                    Event::decode(
+                        &map.get("t")
+                            .expect("t not found in websocket message")
+                            .to_string()
+                            .expect("could not convert to a string"),
+                        map.get("d").expect("d not found in websocket message"),
+                    )?,
+                ),
+                Ok(1) => GatewayEvent::Heartbeat(
+                    map.get("s")
+                        .expect("s not found in websocket message")
+                        .to_u64()
+                        .expect("unable to convert websocket message to u64")
+                        as usize,
+                ),
+                Ok(7) => GatewayEvent::Reconnect,
+                Ok(9) => GatewayEvent::InvalidateSession,
+                Ok(10) => GatewayEvent::Hello(
+                    map.get("d")
                         .expect("d not found in websocket message")
-                        .clone(),
-                )?,
-            ),
-            Some(1) => GatewayEvent::Heartbeat(
-                value
-                    .get("s")
-                    .expect("s not found in websocket message")
-                    .as_u64()
-                    .expect("unable to convert websocket message to u64") as usize,
-            ),
-            Some(7) => GatewayEvent::Reconnect,
-            Some(9) => GatewayEvent::InvalidateSession,
-            Some(10) => GatewayEvent::Hello(
-                value
-                    .get("d")
-                    .expect("d not found in websocket message")
-                    .get("heartbeat_interval")
-                    .expect("heartbeat_interval not found in websocket message")
-                    .as_u64()
-                    .expect("unable to convert websocket message to u64") as usize,
-            ),
-            Some(11) => Self::HeartbeatAck,
-            _ => return Err(Error::msg("unexpected opcode")),
-        })
+                        .to_map()
+                        .expect("unable to convert d to a map")
+                        .get("heartbeat_interval")
+                        .expect("heartbeat_interval not found in websocket message")
+                        .to_u64()
+                        .expect("unable to convert websocket message to u64")
+                        as usize,
+                ),
+                Ok(11) => Self::HeartbeatAck,
+                _ => return Err(Error::msg("unexpected opcode")),
+            },
+        )
     }
 }
 
@@ -973,13 +1148,13 @@ pub fn receive_json<F, T>(
     decode: F,
 ) -> Result<T>
 where
-    F: FnOnce(ureq::serde_json::Value) -> Result<T>,
+    F: FnOnce(WrappedMap) -> Result<T>,
 {
     let message = websocket.lock().unwrap().read()?;
     match message {
         tungstenite::Message::Text(text) => ureq::serde_json::from_str(&text)
             .map_err(From::from)
-            .and_then(decode)
+            .and_then(|x| WrappedValue(x).to_decoder(decode))
             .map_err(|e| e),
         tungstenite::Message::Binary(bin) => {
             let mut vec;
@@ -990,7 +1165,7 @@ where
             };
             ureq::serde_json::from_reader(text)
                 .map_err(From::from)
-                .and_then(decode)
+                .and_then(|x| WrappedValue(x).to_decoder(decode))
                 .map_err(|e| e)
         }
         _ => {
