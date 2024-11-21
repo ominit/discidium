@@ -1,72 +1,52 @@
 mod central_panel;
 mod login;
 
-use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
-use anyhow::Result;
 use central_panel::central_panel;
-use eframe::{
-    egui::{FontFamily, FontId, TextStyle},
-    App,
-};
 use keyring::Entry;
 use login::login_ui;
 use secrecy::{ExposeSecret, SecretString};
+use widget::node::BoxedUiNode;
+use zng::prelude::*;
 
 use crate::api::{client::Client, state::State, Connection};
 
-pub fn create_ui() -> Result<()> {
-    let native_options = eframe::NativeOptions::default();
-    eframe::run_native(
-        "discidium",
-        native_options,
-        Box::new(|cc| Ok(Box::new(DiscidiumApp::new(cc)?))),
-    )
-    .unwrap();
-    Ok(())
+pub fn create_ui() {
+    zng::env::init!();
+    let data = Arc::new(Mutex::new(DiscidiumData::init()));
+
+    APP.defaults().run_window(async move {
+        Window! {
+            title = "discidium";
+            child = ui(data);
+        }
+    });
 }
 
-struct DiscidiumApp {
+struct DiscidiumData {
     token: Option<SecretString>,
     client: Option<Client>,
     connection: Option<Connection>,
     state: Option<State>,
-    text_edit: BTreeMap<String, String>,
 }
 
-impl DiscidiumApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Result<Self> {
-        let mut style = (*cc.egui_ctx.style()).clone();
-        style.text_styles = [
-            (TextStyle::Body, FontId::new(23.0, FontFamily::Proportional)),
-            (
-                TextStyle::Heading,
-                FontId::new(23.0, FontFamily::Proportional),
-            ),
-            (
-                TextStyle::Button,
-                FontId::new(23.0, FontFamily::Proportional),
-            ),
-        ]
-        .into();
-
-        cc.egui_ctx.set_style(style);
-
-        let mut app = Self {
+impl DiscidiumData {
+    fn init() -> Self {
+        let mut data = Self {
             token: None,
             client: None,
             connection: None,
             state: None,
-            text_edit: BTreeMap::new(),
         };
 
         let entry = Entry::new("discidium", &whoami::username());
         if entry.is_ok() && entry.as_ref().unwrap().get_password().is_ok() {
             let token = entry.unwrap().get_password().unwrap();
-            app.update_from_token(SecretString::from(token));
+            data.update_from_token(SecretString::from(token));
         }
 
-        Ok(app)
+        data
     }
 
     pub fn update_from_token(&mut self, token: SecretString) {
@@ -86,19 +66,11 @@ impl DiscidiumApp {
     }
 }
 
-impl App for DiscidiumApp {
-    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
-        ui(self, ctx, frame);
-        ctx.request_repaint();
+fn ui(data: Arc<Mutex<DiscidiumData>>) -> BoxedUiNode {
+    if data.lock().unwrap().token.is_none() {
+        return login_ui(data);
     }
-}
-
-fn ui(app: &mut DiscidiumApp, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
-    if app.token.is_none() {
-        login_ui(app, ctx);
-        return;
-    }
-    central_panel(app, ctx);
+    central_panel(data)
 }
 
 // fn servers_ui(data: &mut Data, ui: &mut Ui) {

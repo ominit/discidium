@@ -218,6 +218,12 @@ impl EmojiId {
 #[derive(Clone, Debug)]
 pub struct Emoji(pub String);
 
+impl Emoji {
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        Ok(Self(map.get("name").unwrap().to_string()?))
+    }
+}
+
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Deserialize)]
 pub enum ChannelType {
     Group,
@@ -338,6 +344,7 @@ pub struct User {
     pub discriminator: u16,
     pub global_name: Option<String>,
     pub id: UserId,
+    pub primary_guild: Option<String>,
     pub public_flags: u64,
     pub username: String,
 }
@@ -363,6 +370,10 @@ impl User {
             .and_then(|x| Some(x.to_string()))
             .transpose()?;
         let id = map.get("id").unwrap().to_value_decoder(UserId::decode)?;
+        let primary_guild = map
+            .get("primary_guild")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
         let public_flags = map.get("public_flags").unwrap().to_u64()?;
         let username = map.get("username").unwrap().to_string()?;
         map.check_empty_panic("User");
@@ -373,6 +384,7 @@ impl User {
             discriminator,
             global_name,
             id,
+            primary_guild,
             public_flags,
             username,
         })
@@ -715,6 +727,7 @@ pub struct CurrentUser {
     pub phone: String,
     pub premium: bool,
     pub premium_type: u64,
+    pub primary_guild: Option<String>,
     pub pronouns: String,
     pub purchased_flags: u64,
     pub username: String,
@@ -761,6 +774,10 @@ impl CurrentUser {
         let phone = map.get("phone").unwrap().to_string()?;
         let premium = map.get("premium").unwrap().to_bool()?;
         let premium_type = map.get("premium_type").unwrap().to_u64()?;
+        let primary_guild = map
+            .get("primary_guild")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
         let pronouns = map.get("pronouns").unwrap().to_string()?;
         let purchased_flags = map.get("purchased_flags").unwrap().to_u64()?;
         let username = map.get("username").unwrap().to_string()?;
@@ -786,6 +803,7 @@ impl CurrentUser {
             phone,
             premium,
             premium_type,
+            primary_guild,
             pronouns,
             purchased_flags,
             username,
@@ -845,28 +863,39 @@ pub enum RelationshipType {
 
 #[derive(Debug, Clone)]
 pub struct Presence {
-    // pub activities: Vec<PresenceActivity>,
-    // pub client_status: PresenceClientStatus,
-    // pub last_modified: u64,
-    // pub status: Status,
-    // pub user: User,
+    pub activities: Vec<PresenceActivity>,
+    pub client_status: PresenceClientStatus,
+    pub last_modified: u64,
+    pub status: Status,
+    pub user: User,
 }
 
 impl Presence {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        // let activities =
-        //     decode_array(remove_value(value, "activities"), PresenceActivity::decode).unwrap();
-        // let client_status = PresenceClientStatus::decode(remove_value(value, "client_status"));
-        // let last_modified = decode_u64(remove_value(value, "last_modified")).unwrap();
-        // let status = Status::decode(remove_value(value, "status")).unwrap();
-        // let user = User::decode(remove_value(value, "user"));
+        let activities = map
+            .get("activities")
+            .unwrap()
+            .to_array()?
+            .into_iter()
+            .map(|x| x.to_decoder(PresenceActivity::decode))
+            .collect::<Result<Vec<_>>>()?;
+        let client_status = map
+            .get("client_status")
+            .unwrap()
+            .to_decoder(PresenceClientStatus::decode)?;
+        let last_modified = map.get("last_modified").unwrap().to_u64()?;
+        let status = map
+            .get("status")
+            .unwrap()
+            .to_value_decoder(Status::decode)?;
+        let user = map.get("user").unwrap().to_decoder(User::decode)?;
         map.check_empty_panic("Presence");
         Ok(Self {
-            // activities,
-            // client_status,
-            // last_modified,
-            // status,
-            // user,
+            activities,
+            client_status,
+            last_modified,
+            status,
+            user,
         })
     }
 }
@@ -887,17 +916,30 @@ impl Status {
 
 #[derive(Debug, Clone)]
 pub struct PresenceClientStatus {
-    // pub desktop: Status,
-    // pub mobile: Option<Status>,
+    pub desktop: Option<Status>,
+    pub mobile: Option<Status>,
+    pub web: Option<Status>,
 }
 
 impl PresenceClientStatus {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        // let desktop = Status::decode(remove_value(value, "desktop")).unwrap();
-        // let mobile = Status::decode(remove_value(value, "mobile"));
+        let desktop = map
+            .get("desktop")
+            .and_then(|x| Some(x.to_value_decoder(Status::decode)))
+            .transpose()?;
+        let mobile = map
+            .get("mobile")
+            .and_then(|x| Some(x.to_value_decoder(Status::decode)))
+            .transpose()?;
+        let web = map
+            .get("web")
+            .and_then(|x| Some(x.to_value_decoder(Status::decode)))
+            .transpose()?;
         map.check_empty_panic("PresenceClientStatus");
         Ok(Self {
-            // desktop, mobile
+            desktop,
+            mobile,
+            web,
         })
     }
 }
@@ -905,36 +947,38 @@ impl PresenceClientStatus {
 #[derive(Debug, Clone)]
 pub struct PresenceActivity {
     // pub assets: Option<PresenceActivityAsset>,
-    // pub created_at: u64,
+    pub created_at: u64,
     // pub details: Option<String>,
-    // pub emoji: Option<Emoji>,
+    pub emoji: Option<Emoji>,
     // pub flags: Option<u64>,
-    // pub id: String,
-    // pub name: String,
+    pub id: String,
+    pub name: String,
     // pub party: Option<PresenceActivityParty>,
     // pub session_id: Option<String>,
-    // pub state: String,
+    pub state: String,
     // pub sync_id: Option<String>,
     // pub timestamp_end: Option<String>,
     // pub timestamp_start: Option<String>,
-    // pub type_activity: u64,
+    pub type_activity: u64,
 }
 
 impl PresenceActivity {
     fn decode(mut map: WrappedMap) -> Result<Self> {
         // let assets = PresenceActivityAsset::decode(remove_value(value, "assets"));
-        // let created_at = decode_u64(remove_value(value, "created_at")).unwrap();
+        let created_at = map.get("created_at").unwrap().to_u64()?;
         // let details = decode_string(remove_value(value, "details"));
-        // let emoji = None;
-        // remove_value(value, "emoji"); // TODO
+        let emoji = map
+            .get("emoji")
+            .and_then(|x| Some(x.to_decoder(Emoji::decode)))
+            .transpose()?;
         // let flags = decode_u64(remove_value(value, "flags"));
-        // let id = decode_string(remove_value(value, "id")).unwrap();
-        // let name = decode_string(remove_value(value, "name")).unwrap();
+        let id = map.get("id").unwrap().to_string()?;
+        let name = map.get("name").unwrap().to_string()?;
         // let party = PresenceActivityParty::decode(remove_value(value, "party"));
         // let session_id = decode_string(remove_value(value, "session_id"));
-        // let state = decode_string(remove_value(value, "state")).unwrap();
+        let state = map.get("state").unwrap().to_string()?;
         // let sync_id = decode_string(remove_value(value, "sync_id"));
-        // let type_activity = decode_u64(remove_value(value, "type")).unwrap();
+        let type_activity = map.get("type").unwrap().to_u64()?;
         // let timestamp = remove_value(value, "timestamps").clone();
         // let mut timestamp_end = None;
         // let mut timestamp_start = None;
@@ -951,19 +995,19 @@ impl PresenceActivity {
         map.check_empty_panic("PresenceActivity");
         Ok(Self {
             // assets,
-            // created_at,
+            created_at,
             // details,
-            // emoji,
+            emoji,
             // flags,
-            // id,
-            // name,
+            id,
+            name,
             // party,
             // session_id,
-            // state,
+            state,
             // sync_id,
             // timestamp_end,
             // timestamp_start,
-            // type_activity,
+            type_activity,
         })
     }
 }
@@ -1003,7 +1047,7 @@ impl PresenceActivityAsset {
 
 #[derive(Debug, Clone)]
 pub struct ReadyEvent {
-    // pub presences: Vec<Presence>,
+    pub presences: Vec<Presence>,
     pub private_channels: Vec<Channel>,
     // pub relationships: Vec<Relationship>,
     pub session_id: String,
@@ -1032,10 +1076,13 @@ impl ReadyEvent {
         map.get("guilds");
         map.get("notes");
         map.get("notification_settings");
-        // let presences = decode_array(remove_value(value, "presences"), Presence::decode).unwrap();
-        map.get("presences");
-        // let private_channels =
-        //     decode_array(remove_value(value, "private_channels"), Channel::decode)?;
+        let presences = map
+            .get("presences")
+            .unwrap()
+            .to_array()?
+            .into_iter()
+            .map(|x| x.to_decoder(Presence::decode))
+            .collect::<Result<Vec<_>>>()?;
         let private_channels = map
             .get("private_channels")
             .unwrap()
@@ -1060,7 +1107,7 @@ impl ReadyEvent {
         let v = map.get("v").unwrap().to_u64()?;
         map.check_empty_panic("ReadyEvent");
         Ok(Self {
-            // presences,
+            presences,
             private_channels,
             // relationships,
             session_id,

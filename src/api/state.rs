@@ -1,35 +1,18 @@
-use std::collections::BTreeMap;
+use super::model::{Channel, CurrentUser, Event, Presence, ReadyEvent};
 
-use super::model::{
-    CurrentUser, Event, Group, PrivateChannel, PublicChannel, ReadyEvent, Relationship, ServerId,
-    UserId,
-};
-
+#[derive(Debug)]
 pub struct State {
-    // user: CurrentUser,
-    // servers: Vec<LiveServer>,
-    // dead_servers: Vec<ServerId>,
-    // private_channels: Vec<PrivateChannel>,
-    // groups: BTreeMap<ChannelId, Group>,
-    // calls: BTreeMap<ChannelId, Call>,
-    // presences: Vec<Presence>,
-    // relationships: Vec<Relationship>,
-    // settings: UserSettings,
-    // server_settings: Vec<ServersSettings>,
-    // notes: Option<BTreeMap<UserId, Option<String>>>,
+    presences: Vec<Presence>,
+    private_channels: Vec<Channel>,
+    user: CurrentUser,
 }
 
 impl State {
     pub fn new(ready: ReadyEvent) -> Self {
-        // let mut servers = Vec::new();
-        // let mut unavailable = Vec::new();
-        // for server in ready.servers {}
-
         Self {
-            // user: ready.user,
-            // dead_servers: unavailable,
-            // relationships: ready.relationships,
-            // notes: Some(ready.notes),
+            presences: ready.presences,
+            private_channels: ready.private_channels,
+            user: ready.user,
         }
     }
 
@@ -39,10 +22,4 @@ impl State {
             _ => {}
         }
     }
-}
-
-pub enum ChannelRef<'a> {
-    Private(&'a PrivateChannel),
-    Group(&'a Group),
-    // Public(&'a LiveServer, &'a PublicChannel),
 }
