@@ -1,12 +1,11 @@
 use std::sync::{Arc, Mutex};
 
-use secrecy::SecretString;
 use widget::node::BoxedUiNode;
 use zng::prelude::*;
 
 use super::DiscidiumData;
 
-pub fn login_ui(data: Arc<Mutex<DiscidiumData>>) -> BoxedUiNode {
+pub fn login_ui(data: Option<Arc<Mutex<DiscidiumData>>>) -> BoxedUiNode {
     let token = var(Txt::from_static(""));
     Box::new(Stack! {
         spacing = 25;
@@ -26,8 +25,8 @@ pub fn login_ui(data: Arc<Mutex<DiscidiumData>>) -> BoxedUiNode {
                 ];
             },
             Button!{
-                on_click = hn!(token, data, |_| {
-                    data.lock().unwrap().update_from_token(SecretString::from(token.get().as_str()));
+                on_click = hn!(token, mut data, |_| {
+                    let _ = data.insert(DiscidiumData::from_token(token.get_string()));
                     token.set("");
                 });
                 child = Text!("submit");

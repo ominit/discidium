@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.89"
 chrono = { version = "0.4.38", features = ["serde"] }
-crossbeam-channel = "0.5.13"
 flate2 = "1.0.34"
 keyring = { version = "3.6.1", features = [
   "apple-native",

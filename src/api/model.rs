@@ -946,101 +946,124 @@ impl PresenceClientStatus {
 
 #[derive(Debug, Clone)]
 pub struct PresenceActivity {
-    // pub assets: Option<PresenceActivityAsset>,
+    pub assets: Option<PresenceActivityAsset>,
     pub created_at: u64,
-    // pub details: Option<String>,
+    pub details: Option<String>,
     pub emoji: Option<Emoji>,
-    // pub flags: Option<u64>,
+    pub flags: Option<u64>,
     pub id: String,
     pub name: String,
-    // pub party: Option<PresenceActivityParty>,
-    // pub session_id: Option<String>,
+    pub party: Option<PresenceActivityParty>,
+    pub session_id: Option<String>,
     pub state: String,
-    // pub sync_id: Option<String>,
-    // pub timestamp_end: Option<String>,
-    // pub timestamp_start: Option<String>,
+    pub sync_id: Option<String>,
+    pub timestamp: Option<Timestamp>,
     pub type_activity: u64,
 }
 
 impl PresenceActivity {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        // let assets = PresenceActivityAsset::decode(remove_value(value, "assets"));
+        let assets = map
+            .get("assets")
+            .and_then(|x| Some(x.to_decoder(PresenceActivityAsset::decode)))
+            .transpose()?;
         let created_at = map.get("created_at").unwrap().to_u64()?;
-        // let details = decode_string(remove_value(value, "details"));
+        let details = map
+            .get("details")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
         let emoji = map
             .get("emoji")
             .and_then(|x| Some(x.to_decoder(Emoji::decode)))
             .transpose()?;
-        // let flags = decode_u64(remove_value(value, "flags"));
+        let flags = map
+            .get("flags")
+            .and_then(|x| Some(x.to_u64()))
+            .transpose()?;
         let id = map.get("id").unwrap().to_string()?;
         let name = map.get("name").unwrap().to_string()?;
-        // let party = PresenceActivityParty::decode(remove_value(value, "party"));
-        // let session_id = decode_string(remove_value(value, "session_id"));
+        let party = map
+            .get("party")
+            .and_then(|x| Some(x.to_decoder(PresenceActivityParty::decode)))
+            .transpose()?;
+        let session_id = map
+            .get("session_id")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
         let state = map.get("state").unwrap().to_string()?;
-        // let sync_id = decode_string(remove_value(value, "sync_id"));
+        let sync_id = map
+            .get("sync_id")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
         let type_activity = map.get("type").unwrap().to_u64()?;
-        // let timestamp = remove_value(value, "timestamps").clone();
-        // let mut timestamp_end = None;
-        // let mut timestamp_start = None;
-        // if timestamp.is_some() {
-        //     timestamp_end = decode_string(remove_value(
-        //         &mut timestamp.clone().unwrap().as_object_mut().unwrap(),
-        //         "end",
-        //     ));
-        //     timestamp_start = decode_string(remove_value(
-        //         &mut timestamp.unwrap().as_object_mut().unwrap(),
-        //         "start",
-        //     ));
-        // }
+        let timestamp = map
+            .get("timestamps")
+            .and_then(|x| Some(x.to_decoder(Timestamp::decode)))
+            .transpose()?;
         map.check_empty_panic("PresenceActivity");
         Ok(Self {
-            // assets,
+            assets,
             created_at,
-            // details,
+            details,
             emoji,
-            // flags,
+            flags,
             id,
             name,
-            // party,
-            // session_id,
+            party,
+            session_id,
             state,
-            // sync_id,
-            // timestamp_end,
-            // timestamp_start,
+            sync_id,
+            timestamp,
             type_activity,
         })
     }
 }
 
 #[derive(Debug, Clone)]
+struct Timestamp {
+    pub end: Option<u64>,
+    pub start: Option<u64>,
+}
+
+impl Timestamp {
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        let end = map.get("end").and_then(|x| Some(x.to_u64())).transpose()?;
+        let start = map
+            .get("start")
+            .and_then(|x| Some(x.to_u64()))
+            .transpose()?;
+        map.check_empty_panic("Timestamp");
+        Ok(Self { end, start })
+    }
+}
+
+#[derive(Debug, Clone)]
 struct PresenceActivityParty {
-    // pub id: String,
+    pub id: String,
 }
 
 impl PresenceActivityParty {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        // let id = decode_string(remove_value(value, "id")).unwrap();
+        let id = map.get("id").unwrap().to_string()?;
         map.check_empty_panic("PresenceActivityParty");
-        Ok(Self {
-            // id
-        })
+        Ok(Self { id })
     }
 }
 
 #[derive(Debug, Clone)]
 struct PresenceActivityAsset {
-    // pub large_image: String,
-    // pub large_text: String,
+    pub large_image: String,
+    pub large_text: String,
 }
 
 impl PresenceActivityAsset {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        // let large_image = decode_string(remove_value(value, "large_image")).unwrap();
-        // let large_text = decode_string(remove_value(value, "large_text")).unwrap();
+        let large_image = map.get("large_image").unwrap().to_string()?;
+        let large_text = map.get("large_text").unwrap().to_string()?;
         map.check_empty_panic("PresenceActivityAsset");
         Ok(Self {
-            // large_image,
-            // large_text,
+            large_image,
+            large_text,
         })
     }
 }
@@ -1152,36 +1175,28 @@ impl GatewayEvent {
                 Ok(0) => GatewayEvent::Dispatch(
                     map.get("s")
                         .expect("s not found in websocket message")
-                        .to_u64()
-                        .expect("unable to convert websocket message to u64")
-                        as usize,
+                        .to_u64()? as usize,
                     Event::decode(
                         &map.get("t")
                             .expect("t not found in websocket message")
-                            .to_string()
-                            .expect("could not convert to a string"),
+                            .to_string()?,
                         map.get("d").expect("d not found in websocket message"),
                     )?,
                 ),
                 Ok(1) => GatewayEvent::Heartbeat(
                     map.get("s")
                         .expect("s not found in websocket message")
-                        .to_u64()
-                        .expect("unable to convert websocket message to u64")
-                        as usize,
+                        .to_u64()? as usize,
                 ),
                 Ok(7) => GatewayEvent::Reconnect,
                 Ok(9) => GatewayEvent::InvalidateSession,
                 Ok(10) => GatewayEvent::Hello(
                     map.get("d")
                         .expect("d not found in websocket message")
-                        .to_map()
-                        .expect("unable to convert d to a map")
+                        .to_map()?
                         .get("heartbeat_interval")
                         .expect("heartbeat_interval not found in websocket message")
-                        .to_u64()
-                        .expect("unable to convert websocket message to u64")
-                        as usize,
+                        .to_u64()? as usize,
                 ),
                 Ok(11) => Self::HeartbeatAck,
                 _ => return Err(Error::msg("unexpected opcode")),

@@ -1,6 +1,6 @@
 use std::{
     net::TcpStream,
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
 };
 
 use anyhow::{Error, Result};
@@ -12,7 +12,7 @@ use crate::api::model::{receive_json, Event, GatewayEvent};
 use super::model::{ReadyEvent, UserId};
 
 pub struct Connection {
-    keepalive_channel: crossbeam_channel::Sender<Status>,
+    keepalive_channel: mpsc::Sender<Status>,
     websocket: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
     token: SecretString,
     session_id: Option<String>,
@@ -55,7 +55,7 @@ impl Connection {
             _ => return Err(Error::msg("expected hello during handshake")),
         }
 
-        let (sender, receiver) = crossbeam_channel::unbounded();
+        let (sender, receiver) = mpsc::channel();
         let keepalive_websocket = websocket.clone();
         std::thread::Builder::new()
             .name("Discord Websocket Keepalive".to_string())
@@ -81,13 +81,13 @@ impl Connection {
 
         Ok((
             Self {
-                keepalive_channel: sender,
+                keepalive_channel: sender.clone(),
                 websocket,
                 token,
                 session_id: Some(session_id),
                 last_sequence: sequence,
                 identify,
-                user_id: UserId(0), // ready.user.id,
+                user_id: ready.user.id,
                 ws_url: url.to_string(),
             },
             ready,
@@ -98,7 +98,7 @@ impl Connection {
 fn keepalive(
     interval: usize,
     websocket: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
-    channel: crossbeam_channel::Receiver<Status>,
+    channel: mpsc::Receiver<Status>,
 ) {
     let mut tick_len = std::time::Duration::from_millis(interval as u64);
     let mut next_tick_at = std::time::Instant::now() + tick_len;
@@ -127,8 +127,11 @@ fn keepalive(
                     next_tick_at = std::time::Instant::now() + tick_len;
                 }
                 Ok(Status::Aborted) => break 'outer,
-                Err(crossbeam_channel::TryRecvError::Empty) => break,
-                Err(crossbeam_channel::TryRecvError::Disconnected) => break 'outer,
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    println!("heartbeat disconnected");
+                    break 'outer;
+                }
             }
         }
 
@@ -146,6 +149,7 @@ fn keepalive(
                 .expect("unable to send message to websocket");
         }
     }
+    println!("heartbeat_end");
 }
 
 enum Status {

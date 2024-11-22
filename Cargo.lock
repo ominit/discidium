@@ -1192,7 +1192,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "crossbeam-channel",
  "flate2",
  "keyring",
  "pollster",
