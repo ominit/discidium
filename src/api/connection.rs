@@ -11,6 +11,7 @@ use crate::api::model::{receive_json, Event, GatewayEvent};
 
 use super::model::{ReadyEvent, UserId};
 
+#[derive(Debug)]
 pub struct Connection {
     keepalive_channel: mpsc::Sender<Status>,
     websocket: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,

@@ -6,6 +6,7 @@ use crate::api::USER_AGENT;
 
 use super::{connection::Connection, model::ReadyEvent, ratelimit::RateLimits, ENDPOINT_URL};
 
+#[derive(Debug)]
 pub struct Client {
     ratelimits: RateLimits,
     client: ureq::Agent,

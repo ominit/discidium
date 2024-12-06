@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use chrono::Utc;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct RateLimits {
     global: Mutex<RateLimit>,
     endpoints: Mutex<BTreeMap<String, RateLimit>>,
@@ -38,7 +38,7 @@ impl RateLimits {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct RateLimit {
     reset: isize,
     limit: isize,

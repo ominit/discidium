@@ -1,36 +1,29 @@
-use std::sync::{Arc, Mutex};
+use ratatui::{
+    layout::{Constraint, Layout},
+    text::{Text, ToText},
+    widgets::{Block, Paragraph},
+    Frame,
+};
+use tui_textarea::TextArea;
 
-use widget::node::BoxedUiNode;
-use zng::prelude::*;
+use super::{DiscidiumData, TUIApp};
 
-use super::DiscidiumData;
-
-pub fn login_ui(data: Option<Arc<Mutex<DiscidiumData>>>) -> BoxedUiNode {
-    let token = var(Txt::from_static(""));
-    Box::new(Stack! {
-        spacing = 25;
-        direction = StackDirection::top_to_bottom();
-        children_align = Align::CENTER;
-        children = ui_vec![
-            Text!("login"),
-            Stack!{
-                spacing = 10;
-                direction = StackDirection::left_to_right();
-                children = ui_vec![
-                    Text!("token"),
-                    TextInput!{
-                        txt = token.clone();
-                        obscure_txt = true;
-                    },
-                ];
-            },
-            Button!{
-                on_click = hn!(token, mut data, |_| {
-                    let _ = data.insert(DiscidiumData::from_token(token.get_string()));
-                    token.set("");
-                });
-                child = Text!("submit");
-            },
-        ];
-    })
+pub fn login_ui(app: &mut TUIApp, frame: &mut Frame) {
+    let [area] = Layout::horizontal([Constraint::Length(20)])
+        .flex(ratatui::layout::Flex::Center)
+        .areas(frame.area());
+    let vertical = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .flex(ratatui::layout::Flex::Center);
+    let [login_area, p_area, q_area, enter_area] = vertical.areas(area);
+    frame.render_widget(Text::raw("login").centered(), login_area);
+    frame.render_widget(Text::raw("p - paste token"), p_area);
+    frame.render_widget(Text::raw("q - quit"), q_area);
+    if app.text_edit.contains_key("login_token") {
+        frame.render_widget(Text::raw("enter - login with pasted token"), enter_area);
+    }
 }
