@@ -3,7 +3,7 @@ use std::sync::{mpsc::Sender, Arc};
 use cushy::{
     context::Trackable,
     figures::IntoComponents,
-    value::{Dynamic, DynamicRead, IntoValue, Source},
+    value::{Destination, Dynamic, DynamicRead, IntoValue, Source},
     widget::{MakeWidget, MakeWidgetList, WidgetInstance},
     widgets::Canvas,
 };
@@ -56,16 +56,7 @@ fn channels_list(
                 .map_ref(|x| {
                     x.map_ref(|x| {
                         x.iter()
-                            .map(|x| match x.clone() {
-                                Channel::Group(channel) => channel.id.0.to_string().make_widget(),
-                                Channel::Private(channel) => {
-                                    channel.recipient.username.make_widget()
-                                }
-                                Channel::Public(_) => todo!(),
-                                Channel::Category(_) => todo!(),
-                                Channel::News => todo!(),
-                                Channel::Store => todo!(),
-                            })
+                            .map(|x| channel(x.clone(), cur_channel_id.clone()))
                             .collect::<Vec<_>>()
                     })
                 })
@@ -73,4 +64,24 @@ fn channels_list(
         )
         .into_rows()
         .make_widget()
+}
+
+fn channel(channel: Channel, cur_channel_id: Dynamic<Option<ChannelId>>) -> WidgetInstance {
+    match channel {
+        Channel::Group(channel) => channel
+            .name()
+            .into_button()
+            .on_click(move |_| cur_channel_id.set(Some(channel.id)))
+            .make_widget(),
+        Channel::Private(channel) => channel
+            .recipient
+            .username
+            .into_button()
+            .on_click(move |_| cur_channel_id.set(Some(channel.id)))
+            .make_widget(),
+        Channel::Public(_) => todo!(),
+        Channel::Category(_) => todo!(),
+        Channel::News => todo!(),
+        Channel::Store => todo!(),
+    }
 }
