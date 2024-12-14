@@ -262,7 +262,7 @@ impl ChannelType {
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct ChannelCategory {
     pub name: String,
     pub parent_id: Option<ChannelId>,
@@ -336,7 +336,7 @@ pub struct Ban {
     user: User,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct User {
     pub avatar: Option<String>,
     pub avatar_decoration_data: Option<AvatarDecorationData>,
@@ -420,7 +420,7 @@ impl User {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Clan {
     pub badge: Option<String>,
     pub identity_enabled: bool,
@@ -453,7 +453,7 @@ impl Clan {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AvatarDecorationData {
     pub asset: String,
     pub expires_at: Option<u64>,
@@ -496,7 +496,7 @@ impl Member {
     // }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Channel {
     Group(Group),
     Private(PrivateChannel),
@@ -522,7 +522,7 @@ impl Channel {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Group {
     pub blocked_user_warning_dismissed: bool,
     pub flags: u64,
@@ -621,7 +621,7 @@ pub struct Call {
     // pub voice_states: Vec<VoiceState>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PrivateChannel {
     pub flags: u64,
     pub id: ChannelId,
@@ -685,7 +685,7 @@ impl PrivateChannel {
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct PublicChannel {
     pub id: ChannelId,
     pub name: String,
@@ -711,13 +711,13 @@ impl PublicChannel {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PermissionOverwriteType {
     Member(UserId),
     Role(RoleId),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PermissionOverwrite {
     pub permission_overwrite_type: PermissionOverwriteType,
     // pub allow: Permissions,
@@ -1067,6 +1067,7 @@ impl PresenceClientStatus {
 
 #[derive(Debug, Clone)]
 pub struct PresenceActivity {
+    pub application_id: Option<ApplicationId>,
     pub assets: Option<PresenceActivityAsset>,
     pub created_at: u64,
     pub details: Option<String>,
@@ -1076,14 +1077,18 @@ pub struct PresenceActivity {
     pub name: String,
     pub party: Option<PresenceActivityParty>,
     pub session_id: Option<String>,
-    pub state: String,
+    pub state: Option<String>,
     pub sync_id: Option<String>,
     pub timestamp: Option<Timestamp>,
-    pub type_activity: u64,
+    pub type_activity: u64, // TODO separate into types
 }
 
 impl PresenceActivity {
     fn decode(mut map: WrappedMap) -> Result<Self> {
+        let application_id = map
+            .get("application_id")
+            .and_then(|x| Some(x.to_value_decoder(ApplicationId::decode)))
+            .transpose()?;
         let assets = map
             .get("assets")
             .and_then(|x| Some(x.to_decoder(PresenceActivityAsset::decode)))
@@ -1111,7 +1116,10 @@ impl PresenceActivity {
             .get("session_id")
             .and_then(|x| Some(x.to_string()))
             .transpose()?;
-        let state = map.get("state").unwrap().to_string()?;
+        let state = map
+            .get("state")
+            .and_then(|x| Some(x.to_string()))
+            .transpose()?;
         let sync_id = map
             .get("sync_id")
             .and_then(|x| Some(x.to_string()))
@@ -1123,6 +1131,7 @@ impl PresenceActivity {
             .transpose()?;
         map.check_empty_panic("PresenceActivity");
         Ok(Self {
+            application_id,
             assets,
             created_at,
             details,
@@ -1356,7 +1365,8 @@ where
                 .map_err(|e| e)
         }
         other => {
-            todo!("websocket message not text or binary: {:?}", other);
+            println!("websocket message not text or binary: {:?}", other);
+            Err(Error::msg("websocket message not text or binary"))
         }
     }
 }

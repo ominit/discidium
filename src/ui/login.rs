@@ -1,18 +1,14 @@
-use std::sync::Arc;
+use std::sync::mpsc::Sender;
 
 use cushy::{
-    value::{Destination, Dynamic, DynamicRead, Source},
+    value::{Destination, Dynamic, DynamicRead},
     widget::{MakeWidget, WidgetInstance},
     widgets::input::InputValue,
 };
-use parking_lot::Mutex;
 
-use super::DiscidiumData;
+use super::{DiscidiumData, Message};
 
-pub fn login_ui(
-    data: Arc<Mutex<Option<DiscidiumData>>>,
-    is_logged_in: Dynamic<bool>,
-) -> WidgetInstance {
+pub fn login_ui(sender: Sender<Message>, is_logged_in: Dynamic<bool>) -> WidgetInstance {
     let token_input: Dynamic<String> = Dynamic::default();
     token_input
         .to_input()
@@ -23,10 +19,10 @@ pub fn login_ui(
             "login"
                 .into_button()
                 .on_click(move |_| {
-                    let test = DiscidiumData::from_token(token_input.read().to_string());
-                    if test.is_some() {
+                    let data = DiscidiumData::from_token(token_input.read().to_string());
+                    if data.is_some() {
+                        sender.send(Message::Login(data.unwrap())).unwrap();
                         is_logged_in.set(true);
-                        let _ = data.clone().lock().insert(test.unwrap());
                     }
                 })
                 .centered(),

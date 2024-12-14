@@ -1,6 +1,15 @@
+mod logged_in;
 mod login;
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        Arc,
+    },
+    thread::{self, Thread},
+    time::Duration,
+};
 
 use cushy::{
     value::{Destination, Dynamic, DynamicRead, IntoReader, Source, Switchable},
@@ -9,6 +18,7 @@ use cushy::{
     InputState, Run,
 };
 use keyring::Entry;
+use logged_in::logged_in_ui;
 use login::login_ui;
 use parking_lot::Mutex;
 
@@ -20,19 +30,56 @@ use crate::api::{
 };
 
 pub fn create_ui() {
-    DiscidiumData::delete_token();
-    let data = Arc::new(Mutex::new(DiscidiumData::init()));
-    ui(data).run().unwrap();
+    // DiscidiumData::delete_token();
+    let data = DiscidiumData::init();
+    let (sender, reciever) = mpsc::channel::<Message>();
+    let (state_sender, state_reciever) = mpsc::channel::<Arc<Mutex<State>>>();
+    let is_logged_in = data.as_ref().is_some();
+    if data.as_ref().is_some() {
+        sender.send(Message::Login(data.unwrap())).unwrap();
+    }
+    thread::spawn(move || data_thread(reciever, state_sender));
+    ui(state_reciever, sender, is_logged_in).run().unwrap();
 }
 
-fn ui(data: Arc<Mutex<Option<DiscidiumData>>>) -> WidgetInstance {
-    let is_logged_in = Dynamic::new(data.lock().is_some());
+fn data_thread(reciever: Receiver<Message>, state_sender: Sender<Arc<Mutex<State>>>) {
+    let mut data = None;
+    loop {
+        let message = reciever.recv().unwrap();
+        match message {
+            Message::Login(new_data) => {
+                let _ = data.insert(new_data);
+                state_sender
+                    .send(data.as_ref().unwrap().state.clone())
+                    .unwrap();
+            }
+        };
+    }
+}
+
+enum Message {
+    Login(DiscidiumData),
+}
+
+fn ui(
+    state_reciever: Receiver<Arc<Mutex<State>>>,
+    sender: Sender<Message>,
+    logged_in: bool,
+) -> WidgetInstance {
+    if logged_in {
+        println!("arstarstsara");
+        let state = state_reciever.recv().unwrap();
+        println!("arstarstsaraaaaaa");
+        return logged_in_ui(state.clone(), sender.clone());
+    }
+    let is_logged_in = Dynamic::new(false);
     is_logged_in
         .switcher(move |current: &bool, x| {
             if !current {
-                return login_ui(data.clone(), x.clone());
+                return login_ui(sender.clone(), x.clone());
             }
-            "a".make_widget()
+            let state = state_reciever.recv().unwrap();
+            logged_in_ui(state.clone(), sender.clone())
         })
         .make_widget()
 }
@@ -41,7 +88,7 @@ fn ui(data: Arc<Mutex<Option<DiscidiumData>>>) -> WidgetInstance {
 struct DiscidiumData {
     client: Client,
     connection: Connection,
-    state: State,
+    state: Arc<Mutex<State>>,
 }
 
 impl DiscidiumData {
@@ -54,9 +101,12 @@ impl DiscidiumData {
         let client = Client::from_user_token(token.into());
         let (connection, ready) = match client.connect() {
             Ok(a) => a,
-            Err(err) => panic!("error connecting, Err: {:?}", err), // TODO if token doesnt work
+            Err(err) => {
+                return None;
+                // panic!("error connecting, Err: {:?}", err) // TODO if token doesnt work
+            }
         };
-        let state = State::new(ready);
+        let state = Arc::new(Mutex::new(State::new(ready)));
         Some(Self {
             client,
             connection,

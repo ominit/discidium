@@ -3,7 +3,7 @@ use super::model::{Channel, CurrentUser, Event, Presence, ReadyEvent};
 #[derive(Debug)]
 pub struct State {
     presences: Vec<Presence>,
-    private_channels: Vec<Channel>,
+    pub private_channels: Vec<Channel>,
     user: CurrentUser,
 }
 
