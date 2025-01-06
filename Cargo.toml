@@ -1,27 +1,44 @@
 [package]
 name = "discidium"
 version = "0.1.0"
-edition = "2021"
+authors = ["ominit <86736586+ominit@users.noreply.github.com>"]
+edition = "2024"
 
 [dependencies]
-anyhow = "1.0.89"
-arboard = "3.4.1"
-chrono = { version = "0.4.38", features = ["serde"] }
-cushy = "0.4.0"
-flate2 = "1.0.34"
+anyhow = "1.0.95"
+chrono = { version = "0.4.39", features = ["serde"] }
+dioxus = { version = "0.6.1", features = [] }
+flate2 = "1.0.35"
+futures = "0.3.31"
 keyring = { version = "3.6.1", features = [
   "apple-native",
   "windows-native",
   "linux-native-sync-persistent",
 ] }
 parking_lot = "0.12.3"
-pollster = "0.3.0"
 secrecy = { version = "0.10.3", features = ["serde"] }
-serde = { version = "1.0.210", features = ["derive"] }
-serde-aux = "4.5.0"
+serde = { version = "1.0.217", features = ["derive"] }
 tungstenite = { version = "0.24.0", features = [
   "rustls",
   "rustls-tls-native-roots",
-] }
-ureq = { version = "2.10.1", features = ["json"] }
+], optional = true }
+ureq = { version = "2.12.1", features = ["json"], optional = true }
 whoami = "1.5.2"
+
+[features]
+default = ["desktop"]
+web = ["dioxus/web"]
+desktop = ["dioxus/desktop", "dep:tungstenite", "dep:ureq" ]
+mobile = ["dioxus/mobile"]
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"

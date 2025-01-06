@@ -1,6 +1,6 @@
 use super::model::{Channel, CurrentUser, Event, Presence, ReadyEvent};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct State {
     presences: Vec<Presence>,
     pub private_channels: Vec<Channel>,

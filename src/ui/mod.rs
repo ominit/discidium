@@ -1,59 +1,36 @@
-mod logged_in;
-mod login;
+mod components;
 
-use std::{
-    collections::BTreeMap,
-    sync::{
-        mpsc::{self, Receiver, Sender},
-        Arc,
-    },
-    thread::{self, Thread},
-    time::Duration,
-};
-
-use cushy::{
-    value::{Destination, Dynamic, DynamicRead, IntoReader, Source, Switchable},
-    widget::{MakeWidget, WidgetInstance},
-    widgets::Label,
-    InputState, Run,
-};
+use components::Login;
+use dioxus::prelude::*;
 use keyring::Entry;
-use logged_in::logged_in_ui;
-use login::login_ui;
-use parking_lot::Mutex;
 
-use crate::api::{
-    client::Client,
-    model::{ChannelId, ServerId},
-    state::State,
-    Connection,
-};
+use crate::api::{Connection, client::Client, state::State};
+
+const FAVICON: Asset = asset!("/assets/favicon.ico");
+const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
 
 pub fn create_ui() {
     // DiscidiumData::delete_token();
-    let data = DiscidiumData::init();
-    let (sender, reciever) = mpsc::channel::<Message>();
-    let (state_sender, state_reciever) = mpsc::channel::<Arc<Mutex<State>>>();
-    let is_logged_in = data.as_ref().is_some();
-    if data.as_ref().is_some() {
-        sender.send(Message::Login(data.unwrap())).unwrap();
-    }
-    thread::spawn(move || data_thread(reciever, state_sender));
-    ui(state_reciever, sender, is_logged_in).run().unwrap();
+    dioxus::launch(App);
 }
 
-fn data_thread(reciever: Receiver<Message>, state_sender: Sender<Arc<Mutex<State>>>) {
-    let mut data = None;
+async fn data_thread(mut reciever: UnboundedReceiver<Message>, mut state: Signal<Option<State>>) {
+    let mut data = DiscidiumData::init();
+    if data.is_some() {
+        state.set(Some(data.as_ref().unwrap().state.clone()));
+    }
     loop {
-        let message = reciever.recv().unwrap();
-        match message {
-            Message::Login(new_data) => {
-                let _ = data.insert(new_data);
-                state_sender
-                    .send(data.as_ref().unwrap().state.clone())
-                    .unwrap();
-            }
-        };
+        use futures::StreamExt;
+        if let Some(message) = reciever.next().await {
+            match message {
+                Message::Login(new_data) => {
+                    let _ = data.insert(new_data);
+                    state.set(Some(data.as_ref().unwrap().state.clone()));
+                }
+            };
+        } else {
+            break;
+        }
     }
 }
 
@@ -61,34 +38,27 @@ enum Message {
     Login(DiscidiumData),
 }
 
-fn ui(
-    state_reciever: Receiver<Arc<Mutex<State>>>,
-    sender: Sender<Message>,
-    logged_in: bool,
-) -> WidgetInstance {
-    if logged_in {
-        println!("arstarstsara");
-        let state = state_reciever.recv().unwrap();
-        println!("arstarstsaraaaaaa");
-        return logged_in_ui(state.clone(), sender.clone());
+#[component]
+fn App() -> Element {
+    let state = use_signal(|| None);
+    let sender =
+        use_coroutine(move |reciever: UnboundedReceiver<Message>| data_thread(reciever, state));
+    rsx! {
+        document::Link { rel: "icon", href: FAVICON }
+        document::Link { rel: "stylesheet", href: MAIN_CSS }
+        if state.read().is_none() {
+            Login { sender }
+        } else {
+            "logged in!"
+        }
     }
-    let is_logged_in = Dynamic::new(false);
-    is_logged_in
-        .switcher(move |current: &bool, x| {
-            if !current {
-                return login_ui(sender.clone(), x.clone());
-            }
-            let state = state_reciever.recv().unwrap();
-            logged_in_ui(state.clone(), sender.clone())
-        })
-        .make_widget()
 }
 
 #[derive(Debug)]
 struct DiscidiumData {
     client: Client,
     connection: Connection,
-    state: Arc<Mutex<State>>,
+    state: State,
 }
 
 impl DiscidiumData {
@@ -106,7 +76,7 @@ impl DiscidiumData {
                 // panic!("error connecting, Err: {:?}", err) // TODO if token doesnt work
             }
         };
-        let state = Arc::new(Mutex::new(State::new(ready)));
+        let state = State::new(ready);
         Some(Self {
             client,
             connection,

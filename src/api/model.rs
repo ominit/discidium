@@ -9,10 +9,10 @@ use std::{
 use anyhow::{Error, Result};
 use chrono::{DateTime, FixedOffset};
 use serde::{
-    de::{MapAccess, Visitor},
     Deserialize,
+    de::{MapAccess, Visitor},
 };
-use tungstenite::{protocol::frame::coding::OpCode, stream::MaybeTlsStream, WebSocket};
+use tungstenite::{WebSocket, protocol::frame::coding::OpCode, stream::MaybeTlsStream};
 use ureq::serde_json::{Map, Value};
 
 use super::CDN_URL;
@@ -123,9 +123,7 @@ impl std::fmt::Display for Mention {
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
-pub struct UserId(
-    #[serde(deserialize_with = "serde_aux::prelude::deserialize_number_from_string")] pub usize,
-);
+pub struct UserId(pub usize);
 
 impl UserId {
     fn decode(value: WrappedValue) -> Result<Self> {
