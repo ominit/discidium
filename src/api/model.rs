@@ -8,11 +8,7 @@ use std::{
 
 use anyhow::{Error, Result};
 use chrono::{DateTime, FixedOffset};
-use serde::{
-    Deserialize,
-    de::{MapAccess, Visitor},
-};
-use tungstenite::{WebSocket, protocol::frame::coding::OpCode, stream::MaybeTlsStream};
+use tungstenite::{WebSocket, stream::MaybeTlsStream};
 use ureq::serde_json::{Map, Value};
 
 use super::CDN_URL;
@@ -92,20 +88,40 @@ impl WrappedValue {
         Ok(WrappedMap(self.0.as_object().unwrap().clone()))
     }
 
-    fn to_array(self) -> Result<Vec<WrappedValue>> {
+    fn to_array_decoder<T, F: Clone + Fn(WrappedMap) -> Result<T>>(
+        self,
+        decode: F,
+    ) -> Result<Vec<T>> {
         if !self.0.is_array() {
             return Err(Error::msg(format!(
                 "{:?} is not an array",
                 self.0.to_string()
             )));
         }
-        Ok(self
-            .0
+        self.0
             .as_array()
             .unwrap()
             .iter()
-            .map(|x| WrappedValue(x.clone()))
-            .collect())
+            .map(|x| WrappedValue(x.clone()).to_decoder(decode.clone()))
+            .collect::<Result<Vec<_>>>()
+    }
+
+    fn to_array_value_decoder<T, F: Clone + Fn(WrappedValue) -> Result<T>>(
+        self,
+        decode: F,
+    ) -> Result<Vec<T>> {
+        if !self.0.is_array() {
+            return Err(Error::msg(format!(
+                "{:?} is not an array",
+                self.0.to_string()
+            )));
+        }
+        self.0
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| WrappedValue(x.clone()).to_value_decoder(decode.clone()))
+            .collect::<Result<Vec<_>>>()
     }
 }
 
@@ -122,7 +138,7 @@ impl std::fmt::Display for Mention {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
+#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct UserId(pub usize);
 
 impl UserId {
@@ -139,7 +155,7 @@ impl UserId {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
+#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct ChannelId(pub usize);
 
 impl ChannelId {
@@ -156,7 +172,7 @@ impl ChannelId {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
+#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct ApplicationId(pub usize);
 
 impl ApplicationId {
@@ -165,7 +181,7 @@ impl ApplicationId {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
+#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct ServerId(pub usize);
 
 impl ServerId {
@@ -178,7 +194,7 @@ impl ServerId {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
+#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct MessageId(pub usize);
 
 impl MessageId {
@@ -187,7 +203,7 @@ impl MessageId {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug, Deserialize)]
+#[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub struct RoleId(pub usize);
 
 impl RoleId {
@@ -213,7 +229,7 @@ impl EmojiId {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Emoji(pub String);
 
 impl Emoji {
@@ -222,116 +238,408 @@ impl Emoji {
     }
 }
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Deserialize)]
-pub enum ChannelType {
-    Group,
-    Private,
-    Text,
-    Voice,
-    Category,
-    News,
-    Store,
-    NewsThread,
-    PublicThread,
-    PrivateThread,
-    StageVoice,
-    Directory,
-    Forum,
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChannelCategory {
+    pub flags: u64,
+    pub id: ChannelId,
+    pub name: String,
+    pub parent_id: Option<ChannelId>,
+    pub permission_overwrites: Vec<PermissionOverwrite>,
+    pub position: u64,
+    pub version: u64,
 }
 
-impl ChannelType {
-    fn decode(value: WrappedValue) -> Result<Self> {
-        Ok(match value.to_u64()? {
-            0 => ChannelType::Text,
-            1 => ChannelType::Private,
-            2 => ChannelType::Voice,
-            3 => ChannelType::Group,
-            4 => ChannelType::Category,
-            5 => ChannelType::News,
-            6 => ChannelType::Store,
-            10 => ChannelType::NewsThread,
-            11 => ChannelType::PublicThread,
-            12 => ChannelType::PrivateThread,
-            13 => ChannelType::StageVoice,
-            14 => ChannelType::Directory,
-            15 => ChannelType::Forum,
-            other => panic!("unknown channel type {:?}", other),
+impl ChannelCategory {
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        let flags = map.get("flags").unwrap().to_u64()?;
+        let id = map.get("id").unwrap().to_value_decoder(ChannelId::decode)?;
+        let name = map.get("name").unwrap().to_string()?;
+        let parent_id = map
+            .get("parent_id")
+            .and_then(|x| Some(x.to_value_decoder(ChannelId::decode)))
+            .transpose()?;
+        let permission_overwrites = map
+            .get("permission_overwrites")
+            .unwrap()
+            .to_array_decoder(PermissionOverwrite::decode)?;
+        let position = map.get("position").unwrap().to_u64()?;
+        let version = map.get("version").unwrap().to_u64()?;
+        map.check_empty_panic("ChannelCategory");
+        Ok(Self {
+            flags,
+            id,
+            name,
+            parent_id,
+            permission_overwrites,
+            position,
+            version,
         })
     }
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
-pub struct ChannelCategory {
-    pub name: String,
-    pub parent_id: Option<ChannelId>,
-    pub nsfw: bool,
-    pub position: isize,
-    pub server_id: Option<ServerId>,
-    pub id: ChannelId,
+#[derive(Debug, Clone, PartialEq)]
+pub enum PermissionOverwrite {
+    Member(PermissionOverwriteMember),
+    Role(PermissionOverwriteRole),
 }
 
-pub struct ServerInfo {
-    pub id: ServerId,
-    pub name: String,
-    pub icon: Option<String>,
-    pub owner: bool,
-    // pub permissions: Permissions,
-}
-
-pub struct Server {
-    pub id: ServerId,
-    pub name: String,
-    pub afk_timeout: usize,
-    pub afk_channel_id: Option<ChannelId>,
-    pub icon: Option<String>,
-    pub roles: Vec<Role>,
-    pub region: String,
-    pub embed_enabled: bool,
-    pub embed_channel_id: Option<ChannelId>,
-    pub owner_id: UserId,
-    // pub verification_level: VereficationLevel,
-    // pub emojis: Vec<Emoji>,
-    pub features: Vec<String>,
-    pub splash: Option<String>,
-    pub default_message_notifications: usize,
-    pub mfa_level: usize,
-}
-
-impl Server {
-    pub fn icon_url(&self) -> Option<String> {
-        self.icon
-            .as_ref()
-            .map(|x| format!("{}/icons/{}/{}.jpg", CDN_URL, self.id.0, x))
+impl PermissionOverwrite {
+    pub fn decode(mut map: WrappedMap) -> Result<Self> {
+        Ok(match map.get("type").unwrap().to_string()?.as_str() {
+            "member" => PermissionOverwrite::Member(PermissionOverwriteMember::decode(map)?),
+            "role" => PermissionOverwrite::Role(PermissionOverwriteRole::decode(map)?),
+            other => todo!("{:?}", other),
+        })
     }
 }
 
-/// number of members removed by server prune
-pub struct ServerPrune {
-    pub pruned: usize,
+#[derive(Debug, Clone, PartialEq)]
+pub struct PermissionOverwriteMember {
+    allow: Vec<Permission>,
+    allow_new: Vec<Permission>,
+    deny: Vec<Permission>,
+    deny_new: Vec<Permission>,
+    id: UserId,
+}
+
+impl PermissionOverwriteMember {
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        let allow = map
+            .get("allow")
+            .unwrap()
+            .to_value_decoder(Permission::decode)?;
+        let allow_new = map
+            .get("allow_new")
+            .unwrap()
+            .to_value_decoder(Permission::decode)?;
+        let deny = map
+            .get("deny")
+            .unwrap()
+            .to_value_decoder(Permission::decode)?;
+        let deny_new = map
+            .get("deny_new")
+            .unwrap()
+            .to_value_decoder(Permission::decode)?;
+        let id = map.get("id").unwrap().to_value_decoder(UserId::decode)?;
+        map.check_empty_panic("PermissionOverwriteMember");
+        Ok(Self {
+            allow,
+            allow_new,
+            deny,
+            deny_new,
+            id,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PermissionOverwriteRole {
+    allow: Vec<Permission>,
+    allow_new: Vec<Permission>,
+    deny: Vec<Permission>,
+    deny_new: Vec<Permission>,
+    id: RoleId,
+}
+
+impl PermissionOverwriteRole {
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        let allow = map
+            .get("allow")
+            .unwrap()
+            .to_value_decoder(Permission::decode)?;
+        let allow_new = map
+            .get("allow_new")
+            .unwrap()
+            .to_value_decoder(Permission::decode)?;
+        let deny = map
+            .get("deny")
+            .unwrap()
+            .to_value_decoder(Permission::decode)?;
+        let deny_new = map
+            .get("deny_new")
+            .unwrap()
+            .to_value_decoder(Permission::decode)?;
+        let id = map.get("id").unwrap().to_value_decoder(RoleId::decode)?;
+        map.check_empty_panic("PermissionOverwriteMember");
+        Ok(Self {
+            allow,
+            allow_new,
+            deny,
+            deny_new,
+            id,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Permission {
+    ViewChannels,
+    ManageChannels,
+    ManageRoles,
+    CreateExpressions,
+    ManageExpressinos,
+    ViewAuditLog,
+    ManagePermissions,
+    ManageWebhooks,
+    ManageServer,
+    CreateInvite,
+    ChangeNickname,
+    ManageNicknames,
+    KickMembers,
+    BanMembers,
+    TimeoutMembers,
+    SendMessages,
+    SendMessagesThreads,
+    CreatePublicThreads,
+    CreatePrivateThreads,
+    EmbedLinks,
+    AttachFiles,
+    AddReactions,
+    UseExternalEmoji,
+    UseExternalStickers,
+    MentionEveryone,
+    ManageMessages,
+    ManageThreads,
+    ReadMessageHistory,
+    SendTTSMessages,
+    SendVoiceMessages,
+    CreatePolls,
+    Connect,
+    Speak,
+    Video,
+    UseSoundboard,
+    UseExternalSounds,
+    UseVoiceActivity,
+    PrioritySpeaker,
+    MuteMembers,
+    DeafenMembers,
+    MoveMembers,
+    SetVoiceChannelStatus,
+    UseApplicationCommands,
+    UseActivities,
+    UseExternalApps,
+    CreateEvents,
+    ManageEvents,
+    Administrator,
+}
+
+impl Permission {
+    fn decode(value: WrappedValue) -> Result<Vec<Self>> {
+        let mut value = value
+            .clone()
+            .to_u64()
+            .unwrap_or_else(|_| value.to_string().unwrap().parse().unwrap());
+        let mut vec = vec![];
+        if value >= 2_u64.pow(50) {
+            vec.push(Self::UseExternalApps);
+            value -= 2_u64.pow(50);
+        }
+        if value >= 2_u64.pow(49) {
+            vec.push(Self::CreatePolls);
+            value -= 2_u64.pow(49);
+        }
+        if value >= 2_u64.pow(48) {
+            vec.push(Self::SetVoiceChannelStatus);
+            value -= 2_u64.pow(48);
+        }
+        if value >= 2_u64.pow(46) {
+            vec.push(Self::SendVoiceMessages);
+            value -= 2_u64.pow(46);
+        }
+        if value >= 2_u64.pow(45) {
+            vec.push(Self::UseExternalSounds);
+            value -= 2_u64.pow(45);
+        }
+        if value >= 2_u64.pow(44) {
+            vec.push(Self::CreateEvents);
+            value -= 2_u64.pow(44);
+        }
+        if value >= 2_u64.pow(42) {
+            vec.push(Self::UseSoundboard);
+            value -= 2_u64.pow(42);
+        }
+        if value >= 2_u64.pow(39) {
+            vec.push(Self::UseActivities);
+            value -= 2_u64.pow(39);
+        }
+        if value >= 2_u64.pow(38) {
+            vec.push(Self::SendMessagesThreads);
+            value -= 2_u64.pow(38);
+        }
+        if value >= 2_u64.pow(37) {
+            vec.push(Self::UseExternalStickers);
+            value -= 2_u64.pow(37);
+        }
+        if value >= 2_u64.pow(36) {
+            vec.push(Self::CreatePrivateThreads);
+            value -= 2_u64.pow(36);
+        }
+        if value >= 2_u64.pow(35) {
+            vec.push(Self::CreatePublicThreads);
+            value -= 2_u64.pow(35);
+        }
+        if value >= 2_u64.pow(34) {
+            vec.push(Self::ManageThreads);
+            value -= 2_u64.pow(34);
+        }
+        if value >= 2_u64.pow(33) {
+            vec.push(Self::ManageEvents);
+            value -= 2_u64.pow(33);
+        }
+        if value >= 2_u64.pow(31) {
+            vec.push(Self::UseApplicationCommands);
+            value -= 2_u64.pow(31);
+        }
+        if value >= 2_u64.pow(29) {
+            vec.push(Self::ManageWebhooks);
+            value -= 2_u64.pow(29);
+        }
+        if value >= 2_u64.pow(28) {
+            vec.push(Self::ManagePermissions);
+            value -= 2_u64.pow(28);
+        }
+        if value >= 2_u64.pow(25) {
+            vec.push(Self::UseVoiceActivity);
+            value -= 2_u64.pow(25);
+        }
+        if value >= 2_u64.pow(24) {
+            vec.push(Self::MoveMembers);
+            value -= 2_u64.pow(24);
+        }
+        if value >= 2_u64.pow(23) {
+            vec.push(Self::DeafenMembers);
+            value -= 2_u64.pow(23);
+        }
+        if value >= 2_u64.pow(22) {
+            vec.push(Self::MuteMembers);
+            value -= 2_u64.pow(22);
+        }
+        if value >= 2_u64.pow(21) {
+            vec.push(Self::Speak);
+            value -= 2_u64.pow(21);
+        }
+        if value >= 2_u64.pow(20) {
+            vec.push(Self::Connect);
+            value -= 2_u64.pow(20);
+        }
+        if value >= 2_u64.pow(18) {
+            vec.push(Self::UseExternalEmoji);
+            value -= 2_u64.pow(18);
+        }
+        if value >= 2_u64.pow(17) {
+            vec.push(Self::MentionEveryone);
+            value -= 2_u64.pow(17);
+        }
+        if value >= 2_u64.pow(16) {
+            vec.push(Self::ReadMessageHistory);
+            value -= 2_u64.pow(16);
+        }
+        if value >= 2_u64.pow(15) {
+            vec.push(Self::AttachFiles);
+            value -= 2_u64.pow(15);
+        }
+        if value >= 2_u64.pow(14) {
+            vec.push(Self::EmbedLinks);
+            value -= 2_u64.pow(14);
+        }
+        if value >= 2_u64.pow(13) {
+            vec.push(Self::ManageMessages);
+            value -= 2_u64.pow(13);
+        }
+        if value >= 2_u64.pow(12) {
+            vec.push(Self::SendTTSMessages);
+            value -= 2_u64.pow(12);
+        }
+        if value >= 2_u64.pow(11) {
+            vec.push(Self::SendMessages);
+            value -= 2_u64.pow(11);
+        }
+        if value >= 2_u64.pow(10) {
+            vec.push(Self::ViewChannels);
+            value -= 2_u64.pow(10);
+        }
+        if value >= 2_u64.pow(9) {
+            vec.push(Self::Video);
+            value -= 2_u64.pow(9);
+        }
+        if value >= 2_u64.pow(8) {
+            vec.push(Self::PrioritySpeaker);
+            value -= 2_u64.pow(8);
+        }
+        if value >= 2_u64.pow(6) {
+            vec.push(Self::AddReactions);
+            value -= 2_u64.pow(6);
+        }
+        if value >= 2_u64.pow(4) {
+            vec.push(Self::ManageChannels);
+            value -= 2_u64.pow(4);
+        }
+        if value >= 1 {
+            vec.push(Self::CreateInvite);
+            value -= 1;
+        }
+        if value != 0 {
+            panic!("error decoding permission, {:?}", value)
+        }
+        Ok(vec)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Server {
+    afk_channel_id: Option<ChannelId>,
+    afk_timeout: u64,
+    channels: Vec<Channel>,
+}
+
+impl Server {
+    fn decode(mut map: WrappedMap) -> Result<Self> {
+        let afk_channel_id = map
+            .get("afk_channel_id")
+            .and_then(|x| Some(x.to_value_decoder(ChannelId::decode)))
+            .transpose()?;
+        let afk_timeout = map.get("afk_timeout").unwrap().to_u64()?;
+        let channels = map
+            .get("channels")
+            .unwrap()
+            .to_array_decoder(Channel::decode)?;
+        map.check_empty_panic("Server");
+        Ok(Self {
+            afk_channel_id,
+            afk_timeout,
+            channels,
+        })
+    }
+
+    // pub fn icon_url(&self) -> Option<String> {
+    //     self.icon
+    //         .as_ref()
+    //         .map(|x| format!("{}/icons/{}/{}.jpg", CDN_URL, self.id.0, x))
+    // }
 }
 
 pub struct Role {
-    pub id: RoleId,
-    pub name: String,
-    /// Color in 0xRRGGBB form
-    pub color: usize,
-    pub hoist: bool,
-    pub managed: bool,
-    pub position: isize,
-    pub mentionable: bool,
+    // pub id: RoleId,
+    // pub name: String,
+    // /// Color in 0xRRGGBB form
+    // pub color: usize,
+    // pub hoist: bool,
+    // pub managed: bool,
+    // pub position: isize,
+    // pub mentionable: bool,
     // pub permissions: Permissions,
 }
 
 impl Role {
-    #[inline(always)]
-    pub fn mention(&self) -> Mention {
-        self.id.mention()
-    }
+    // #[inline(always)]
+    // pub fn mention(&self) -> Mention {
+    //     self.id.mention()
+    // }
 }
 
 pub struct Ban {
-    reason: Option<String>,
-    user: User,
+    // reason: Option<String>,
+    // user: User,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -476,12 +784,12 @@ impl AvatarDecorationData {
 }
 
 pub struct Member {
-    pub user: User,
-    pub roles: Vec<RoleId>,
-    pub nick: Option<String>,
-    pub joined_at: String,
-    pub mute: bool,
-    pub deaf: bool,
+    // pub user: User,
+    // pub roles: Vec<RoleId>,
+    // pub nick: Option<String>,
+    // pub joined_at: String,
+    // pub mute: bool,
+    // pub deaf: bool,
 }
 
 impl Member {
@@ -512,11 +820,51 @@ impl Channel {
                 .unwrap()
                 .to_value_decoder(ChannelType::decode)?
             {
+                ChannelType::Public => Channel::Public(PublicChannel::decode(map)?),
                 ChannelType::Private => Channel::Private(PrivateChannel::decode(map)?),
                 ChannelType::Group => Channel::Group(Group::decode(map)?),
+                ChannelType::Category => Channel::Category(ChannelCategory::decode(map)?),
                 other => todo!("{:?}", other),
             },
         )
+    }
+}
+
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
+pub enum ChannelType {
+    Group,
+    Private,
+    Public,
+    Voice,
+    Category,
+    News,
+    Store,
+    NewsThread,
+    PublicThread,
+    PrivateThread,
+    StageVoice,
+    Directory,
+    Forum,
+}
+
+impl ChannelType {
+    fn decode(value: WrappedValue) -> Result<Self> {
+        Ok(match value.to_u64()? {
+            0 => ChannelType::Public,
+            1 => ChannelType::Private,
+            2 => ChannelType::Voice,
+            3 => ChannelType::Group,
+            4 => ChannelType::Category,
+            5 => ChannelType::News,
+            6 => ChannelType::Store,
+            10 => ChannelType::NewsThread,
+            11 => ChannelType::PublicThread,
+            12 => ChannelType::PrivateThread,
+            13 => ChannelType::StageVoice,
+            14 => ChannelType::Directory,
+            15 => ChannelType::Forum,
+            other => panic!("unknown channel type {:?}", other),
+        })
     }
 }
 
@@ -566,10 +914,7 @@ impl Group {
         let recipients = map
             .get("recipients")
             .unwrap()
-            .to_array()?
-            .into_iter()
-            .map(|x| x.to_decoder(User::decode))
-            .collect::<Result<Vec<_>>>()?;
+            .to_array_decoder(User::decode)?;
         map.check_empty_panic("Group");
         Ok(Self {
             blocked_user_warning_dismissed,
@@ -611,11 +956,11 @@ impl Group {
 }
 
 pub struct Call {
-    pub channel_id: ChannelId,
-    pub message_id: MessageId,
-    pub region: String,
-    pub ringring: Vec<UserId>,
-    pub unavailable: bool,
+    // pub channel_id: ChannelId,
+    // pub message_id: MessageId,
+    // pub region: String,
+    // pub ringring: Vec<UserId>,
+    // pub unavailable: bool,
     // pub voice_states: Vec<VoiceState>,
 }
 
@@ -655,18 +1000,14 @@ impl PrivateChannel {
         let recipient = map
             .get("recipients")
             .unwrap()
-            .to_array()?
+            .to_array_decoder(User::decode)?
             .first()
             .unwrap()
-            .clone() // TODO
-            .to_decoder(User::decode)?;
+            .clone(); // TODO
         let safety_warnings = map
             .get("safety_warnings")
             .unwrap()
-            .to_array()?
-            .into_iter()
-            .map(|x| x.to_string())
-            .collect::<Result<Vec<_>>>()?;
+            .to_array_value_decoder(|x| x.to_string())?;
         map.check_empty_panic("PrivateChannel");
         Ok(Self {
             flags,
@@ -683,113 +1024,63 @@ impl PrivateChannel {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PublicChannel {
+    pub flags: u64,
     pub id: ChannelId,
-    pub name: String,
-    #[serde(rename = "guild_id")]
-    pub server_id: ServerId,
-    #[serde(rename = "type")]
-    pub channel_type: ChannelType,
-    pub permision_overwrites: Vec<PermissionOverwrite>,
-    pub topic: Option<String>,
-    pub position: isize,
     pub last_message_id: Option<MessageId>,
-    pub bitrate: Option<usize>,
-    pub user_limit: Option<usize>,
-    pub last_pin_timestamp: Option<DateTime<FixedOffset>>,
-    pub nsfw: bool,
-    pub parent_id: Option<ChannelId>,
+    pub name: String,
+    pub parent_id: ChannelId,
+    // pub permission_overwrites: PermissionOverwrite,
+    pub position: u64,
+    pub rate_limit_per_user: u64,
+    pub topic: String,
+    pub version: u64,
 }
 
 impl PublicChannel {
+    pub fn decode(mut map: WrappedMap) -> Result<Self> {
+        let flags = map.get("flags").unwrap().to_u64()?;
+        let id = map.get("id").unwrap().to_value_decoder(ChannelId::decode)?;
+        let last_message_id = map
+            .get("last_message_id")
+            .and_then(|x| Some(x.to_value_decoder(MessageId::decode)))
+            .transpose()?;
+        let name = map.get("name").unwrap().to_string()?;
+        let parent_id = map
+            .get("parent_id")
+            .unwrap()
+            .to_value_decoder(ChannelId::decode)?;
+        // let permission_overwrites = map
+        //     .get("permission_overwrites")
+        //     .unwrap()
+        //     .to_decoder(PermissionOverwrite::decode)?;
+        let position = map.get("position").unwrap().to_u64()?;
+        let rate_limit_per_user = map.get("rate_limit_per_user").unwrap().to_u64()?;
+        let topic = map.get("topic").unwrap().to_string()?;
+        let version = map.get("version").unwrap().to_u64()?;
+        map.check_empty_panic("PublicChannel");
+        Ok(Self {
+            flags,
+            id,
+            last_message_id,
+            name,
+            parent_id,
+            // permission_overwrites,
+            position,
+            rate_limit_per_user,
+            topic,
+            version,
+        })
+    }
+
     #[inline(always)]
     pub fn mention(&self) -> Mention {
         self.id.mention()
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum PermissionOverwriteType {
-    Member(UserId),
-    Role(RoleId),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct PermissionOverwrite {
-    pub permission_overwrite_type: PermissionOverwriteType,
-    // pub allow: Permissions,
-    // pub deny: Permissions,
-}
-
-impl<'de> Deserialize<'de> for PermissionOverwrite {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_map(PermissionOverwriteVisitor {})
-    }
-}
-
-struct PermissionOverwriteVisitor {}
-
-impl<'de> Visitor<'de> for PermissionOverwriteVisitor {
-    type Value = PermissionOverwrite;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("PermissionOverwrite")
-    }
-
-    fn visit_map<A: MapAccess<'de>>(
-        self,
-        mut map: A,
-    ) -> std::result::Result<Self::Value, A::Error> {
-        let mut permission_overwrite_type = None;
-        let mut id = None;
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
-                "type" => match map.next_value::<&str>() {
-                    Ok("member") => {
-                        permission_overwrite_type =
-                            Some(PermissionOverwriteType::Member(UserId(0)));
-                    }
-                    Ok("role") => {
-                        permission_overwrite_type = Some(PermissionOverwriteType::Role(RoleId(0)));
-                    }
-                    Ok(other) => {
-                        panic!("unknown return: {:?}", other)
-                    }
-                    Err(e) => {
-                        panic!("{:?}", e)
-                    }
-                },
-                "id" => {
-                    id = Some(map.next_value::<usize>()?);
-                }
-                _ => {}
-            }
-        }
-
-        let id = id.expect("id not found");
-        let mut permission_overwrite_type =
-            permission_overwrite_type.expect("permission overwrite type not found");
-
-        match permission_overwrite_type {
-            PermissionOverwriteType::Member(_) => {
-                permission_overwrite_type = PermissionOverwriteType::Member(UserId(id));
-            }
-            PermissionOverwriteType::Role(_) => {
-                permission_overwrite_type = PermissionOverwriteType::Role(RoleId(id));
-            }
-        }
-
-        Ok(Self::Value {
-            permission_overwrite_type,
-        })
-    }
-}
-
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CurrentUser {
     pub accent_color: Option<u64>,
     pub avatar: String,
@@ -907,7 +1198,7 @@ impl CurrentUser {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Relationship {
     pub id: UserId,
     pub is_spam_request: bool,
@@ -946,7 +1237,7 @@ impl Relationship {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RelationshipType {
     Ignored,
     Friends,
@@ -968,7 +1259,7 @@ impl RelationshipType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Presence {
     pub activities: Vec<PresenceActivity>,
     pub client_status: PresenceClientStatus,
@@ -983,10 +1274,7 @@ impl Presence {
         let activities = map
             .get("activities")
             .unwrap()
-            .to_array()?
-            .into_iter()
-            .map(|x| x.to_decoder(PresenceActivity::decode))
-            .collect::<Result<Vec<_>>>()?;
+            .to_array_decoder(PresenceActivity::decode)?;
         let client_status = map
             .get("client_status")
             .unwrap()
@@ -1013,7 +1301,7 @@ impl Presence {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Status {
     Online,
     Idle,
@@ -1033,7 +1321,7 @@ impl Status {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PresenceClientStatus {
     pub desktop: Option<Status>,
     pub mobile: Option<Status>,
@@ -1063,7 +1351,7 @@ impl PresenceClientStatus {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PresenceActivity {
     pub application_id: Option<ApplicationId>,
     pub assets: Option<PresenceActivityAsset>,
@@ -1147,7 +1435,7 @@ impl PresenceActivity {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Timestamp {
     pub end: Option<u64>,
     pub start: Option<u64>,
@@ -1165,8 +1453,8 @@ impl Timestamp {
     }
 }
 
-#[derive(Debug, Clone)]
-struct PresenceActivityParty {
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresenceActivityParty {
     pub id: String,
 }
 
@@ -1178,8 +1466,8 @@ impl PresenceActivityParty {
     }
 }
 
-#[derive(Debug, Clone)]
-struct PresenceActivityAsset {
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresenceActivityAsset {
     pub large_image: String,
     pub large_text: String,
 }
@@ -1224,31 +1512,25 @@ impl ReadyEvent {
         map.get("geo_ordered_rtc_regions");
         map.get("guild_experiments");
         map.get("guild_join_requests");
-        map.get("guilds");
+        let servers = map
+            .get("guilds")
+            .unwrap()
+            .to_array_decoder(Server::decode)?;
         map.get("notes");
         map.get("notification_settings");
         let presences = map
             .get("presences")
             .unwrap()
-            .to_array()?
-            .into_iter()
-            .map(|x| x.to_decoder(Presence::decode))
-            .collect::<Result<Vec<_>>>()?;
+            .to_array_decoder(Presence::decode)?;
         let private_channels = map
             .get("private_channels")
             .unwrap()
-            .to_array()?
-            .into_iter()
-            .map(|x| x.to_decoder(Channel::decode))
-            .collect::<Result<Vec<_>>>()?;
+            .to_array_decoder(Channel::decode)?;
         map.get("read_state");
         let relationships = map
             .get("relationships")
             .unwrap()
-            .to_array()?
-            .into_iter()
-            .map(|x| x.to_decoder(Relationship::decode))
-            .collect::<Result<Vec<_>>>()?;
+            .to_array_decoder(Relationship::decode)?;
         map.get("resume_gateway_url");
         let session_id = map.get("session_id").unwrap().to_string()?;
         map.get("session_type");

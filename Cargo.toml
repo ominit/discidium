@@ -17,7 +17,6 @@ keyring = { version = "3.6.1", features = [
 ] }
 parking_lot = "0.12.3"
 secrecy = { version = "0.10.3", features = ["serde"] }
-serde = { version = "1.0.217", features = ["derive"] }
 tungstenite = { version = "0.24.0", features = [
   "rustls",
   "rustls-tls-native-roots",
@@ -27,9 +26,9 @@ whoami = "1.5.2"
 
 [features]
 default = ["desktop"]
-web = ["dioxus/web"]
+# web = ["dioxus/web"]
 desktop = ["dioxus/desktop", "dep:tungstenite", "dep:ureq" ]
-mobile = ["dioxus/mobile"]
+# mobile = ["dioxus/mobile"]
 
 [profile]
 
