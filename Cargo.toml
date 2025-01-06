@@ -2,7 +2,7 @@
 name = "discidium"
 version = "0.1.0"
 authors = ["ominit <86736586+ominit@users.noreply.github.com>"]
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 anyhow = "1.0.95"
