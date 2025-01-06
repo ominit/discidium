@@ -8,8 +8,7 @@ use std::{
 
 use anyhow::{Error, Result};
 use chrono::{DateTime, FixedOffset};
-use tungstenite::{WebSocket, stream::MaybeTlsStream};
-use ureq::serde_json::{Map, Value};
+use ureq::serde_json::{self, Map, Value};
 
 use super::CDN_URL;
 
@@ -1619,34 +1618,46 @@ impl GatewayEvent {
     }
 }
 
-pub fn receive_json<F, T>(
-    websocket: &mut Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
-    decode: F,
-) -> Result<T>
+pub fn receive_json<F, T>(ws_receiver: &mut ewebsock::WsReceiver, decode: F) -> Result<T>
 where
     F: FnOnce(WrappedMap) -> Result<T>,
 {
-    let message = websocket.lock().unwrap().read()?;
-    match message {
-        tungstenite::Message::Text(text) => ureq::serde_json::from_str(&text)
-            .map_err(From::from)
-            .and_then(|x| WrappedValue(x).to_decoder(decode))
-            .map_err(|e| e),
-        tungstenite::Message::Binary(bin) => {
-            let mut vec;
-            let text = {
-                vec = Vec::new();
-                flate2::read::ZlibDecoder::new(&bin[..]).read_to_end(&mut vec)?;
-                &vec[..]
-            };
-            ureq::serde_json::from_reader(text)
+    let received = {
+        let mut a = ws_receiver.try_recv();
+        while a.is_none() {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            a = ws_receiver.try_recv();
+        }
+        a.unwrap()
+    };
+    match received {
+        ewebsock::WsEvent::Opened => Err(Error::msg("websocket should have already been opened")),
+        ewebsock::WsEvent::Message(message) => match message {
+            ewebsock::WsMessage::Binary(bin) => {
+                let mut vec;
+                let text = {
+                    vec = Vec::new();
+                    flate2::read::ZlibDecoder::new(&bin[..]).read_to_end(&mut vec)?;
+                    &vec[..]
+                };
+                ureq::serde_json::from_reader(text)
+                    .map_err(From::from)
+                    .and_then(|x| WrappedValue(x).to_decoder(decode))
+                    .map_err(|e| e)
+            }
+            ewebsock::WsMessage::Text(text) => serde_json::from_str(&text)
                 .map_err(From::from)
                 .and_then(|x| WrappedValue(x).to_decoder(decode))
-                .map_err(|e| e)
-        }
-        other => {
-            println!("websocket message not text or binary: {:?}", other);
-            Err(Error::msg("websocket message not text or binary"))
-        }
+                .map_err(|e| e),
+            ewebsock::WsMessage::Unknown(_) => todo!(),
+            ewebsock::WsMessage::Ping(vec) => todo!(),
+            ewebsock::WsMessage::Pong(vec) => todo!(),
+        },
+        ewebsock::WsEvent::Error(_) => todo!(),
+        ewebsock::WsEvent::Closed => todo!(),
+        // other => {
+        //     println!("websocket message not text or binary: {:?}", other);
+        //     Err(Error::msg("websocket message not text or binary"))
+        // }
     }
 }

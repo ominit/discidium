@@ -4,7 +4,7 @@ use components::Login;
 use dioxus::prelude::*;
 use keyring::Entry;
 
-use crate::api::{Connection, client::Client, state::State};
+use crate::api::{client::Client, state::State, Connection};
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
@@ -54,7 +54,6 @@ fn App() -> Element {
     }
 }
 
-#[derive(Debug)]
 struct DiscidiumData {
     client: Client,
     connection: Connection,
@@ -72,8 +71,8 @@ impl DiscidiumData {
         let (connection, ready) = match client.connect() {
             Ok(a) => a,
             Err(err) => {
+                eprintln!("error connecting, Err: {:?}", err); // TODO if token doesnt work
                 return None;
-                // panic!("error connecting, Err: {:?}", err) // TODO if token doesnt work
             }
         };
         let state = State::new(ready);

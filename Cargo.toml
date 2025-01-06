@@ -8,6 +8,7 @@ edition = "2021"
 anyhow = "1.0.95"
 chrono = { version = "0.4.39", features = ["serde"] }
 dioxus = { version = "0.6.1", features = [] }
+ewebsock = { version = "0.8.0", features = [ "tls" ] }
 flate2 = "1.0.35"
 futures = "0.3.31"
 keyring = { version = "3.6.1", features = [
@@ -15,19 +16,14 @@ keyring = { version = "3.6.1", features = [
   "windows-native",
   "linux-native-sync-persistent",
 ] }
-parking_lot = "0.12.3"
 secrecy = { version = "0.10.3", features = ["serde"] }
-tungstenite = { version = "0.24.0", features = [
-  "rustls",
-  "rustls-tls-native-roots",
-], optional = true }
 ureq = { version = "2.12.1", features = ["json"], optional = true }
 whoami = "1.5.2"
 
 [features]
 default = ["desktop"]
 # web = ["dioxus/web"]
-desktop = ["dioxus/desktop", "dep:tungstenite", "dep:ureq" ]
+desktop = ["dioxus/desktop", "dep:ureq" ]
 # mobile = ["dioxus/mobile"]
 
 [profile]
