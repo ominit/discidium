@@ -15,7 +15,7 @@ jobs:
             nix_path: nixpkgs=channel:nixos-unstable
         - uses: DeterminateSystems/magic-nix-cache-action@v8
         - name: Build
-          run: nix develop --command bash -c "dx build --release --platform web"
+          run: nix develop --command bash -c "dx bundle --release --platform web"
         - name: Deploy
           uses: JamesIves/github-pages-deploy-action@v4
           with:
