@@ -70,10 +70,14 @@
       };
 
       devShell = pkgs.mkShell {
-        # inherit buildInputs;
+        inherit buildInputs nativeBuildInputs;
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
         packages = with pkgs; [
           dioxus-cli
+
+          (rust-bin.stable.latest.default.override {
+            targets = ["wasm32-unknown-unknown"];
+          })
         ];
         # RUST_BACKTRACE = 1;
       };
