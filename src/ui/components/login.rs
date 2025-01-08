@@ -14,8 +14,8 @@ pub fn Login(sender: Coroutine<Message>) -> Element {
             }
         }
         button {
-            onclick: move |_| { // TODO make button wait for current event to finish before allowing another click
-                let data = DiscidiumData::from_token(token.read().to_string());
+            onclick: move |_| async move { // TODO make button wait for current event to finish before allowing another click
+                let data = DiscidiumData::from_token(token.read().to_string()).await;
                 if data.is_some() {
                     token.set("".to_string());
                     sender.send(Message::Login(data.unwrap()));

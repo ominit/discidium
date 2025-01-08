@@ -15,7 +15,7 @@ pub fn create_ui() {
 }
 
 async fn data_thread(mut reciever: UnboundedReceiver<Message>, mut state: Signal<Option<State>>) {
-    let mut data = DiscidiumData::init();
+    let mut data = DiscidiumData::init().await;
     if data.is_some() {
         state.set(Some(data.as_ref().unwrap().state.clone()));
     }
@@ -61,14 +61,14 @@ struct DiscidiumData {
 }
 
 impl DiscidiumData {
-    fn init() -> Option<Self> {
+    async fn init() -> Option<Self> {
         let entry = Entry::new("discidium", &whoami::username());
         if entry.is_err() || entry.as_ref().unwrap().get_password().is_err() {
             return None;
         }
         let token = entry.unwrap().get_password().unwrap();
         let client = Client::from_user_token(token.into());
-        let (connection, ready) = match client.connect() {
+        let (connection, ready) = match client.connect().await {
             Ok(a) => a,
             Err(err) => {
                 eprintln!("error connecting, Err: {:?}", err); // TODO if token doesnt work
@@ -92,8 +92,8 @@ impl DiscidiumData {
         let _ = Entry::new("discidium", &whoami::username()).and_then(|x| x.delete_credential());
     }
 
-    pub fn from_token(token: String) -> Option<Self> {
+    pub async fn from_token(token: String) -> Option<Self> {
         Self::set_token(token);
-        Self::init()
+        Self::init().await
     }
 }

@@ -6,6 +6,7 @@ use std::{
 use anyhow::{Error, Result};
 use ewebsock::Options;
 use secrecy::{ExposeSecret, SecretString};
+use serde_json::Value;
 
 use crate::api::model::{receive_json, Event, GatewayEvent};
 
@@ -17,7 +18,7 @@ pub struct Connection {
     token: SecretString,
     session_id: Option<String>,
     last_sequence: usize,
-    identify: ureq::serde_json::Value,
+    identify: Value,
     user_id: UserId,
     ws_url: String,
     // voice
@@ -25,7 +26,7 @@ pub struct Connection {
 
 impl Connection {
     pub fn new(url: &str, token: SecretString) -> Result<(Self, ReadyEvent)> {
-        let d = ureq::json!({
+        let d = serde_json::json!({
             "token": token.expose_secret(),
             "properties": {
                 "$os": std::env::consts::OS,
@@ -37,7 +38,7 @@ impl Connection {
             "large_threshold": 50,
             "compress": true,
         });
-        let identify = ureq::json!({
+        let identify = serde_json::json!({
             "op": 2,
             "d": d,
         });
@@ -132,7 +133,7 @@ fn keepalive(interval: usize, mut ws_sender: ewebsock::WsSender, channel: mpsc::
 
         if std::time::Instant::now() >= next_tick_at {
             next_tick_at = std::time::Instant::now() + tick_len;
-            let map = ureq::json!({
+            let map = serde_json::json!({
                 "op": 1,
                 "d": last_sequence
             });
@@ -144,7 +145,7 @@ fn keepalive(interval: usize, mut ws_sender: ewebsock::WsSender, channel: mpsc::
 }
 
 enum Status {
-    SendMessage(ureq::serde_json::Value),
+    SendMessage(Value),
     Sequence(usize),
     ChangeInterval(u64),
     Aborted,

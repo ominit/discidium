@@ -21,8 +21,8 @@ impl RateLimits {
         }
     }
 
-    pub fn check_for_ratelimit(&self, url: &str, response: &ureq::Response) -> bool {
-        if response.header("X-RateLimit-Global").is_some() {
+    pub fn check_for_ratelimit(&self, url: &str, response: &reqwest::Response) -> bool {
+        if response.headers().contains_key("X-RateLimit-Global") {
             self.global
                 .lock()
                 .expect("Ratelimits poisoned")
@@ -67,20 +67,35 @@ impl RateLimit {
         self.remaining -= 1;
     }
 
-    fn check_for_ratelimit(&mut self, response: &ureq::Response) -> bool {
-        if let Some(reset) = &response.header("X-RateLimit-Reset") {
-            self.reset = reset.parse::<f64>().expect("unable to parse ratelimit") as isize;
+    fn check_for_ratelimit(&mut self, response: &reqwest::Response) -> bool {
+        if let Some(reset) = &response.headers().get("X-RateLimit-Reset") {
+            self.reset = reset
+                .to_str()
+                .unwrap()
+                .parse::<f64>()
+                .expect("unable to parse ratelimit") as isize;
         }
-        if let Some(limit) = &response.header("X-RateLimit-Limit") {
-            self.limit = limit.parse::<f64>().expect("unable to parse ratelimit") as isize;
+        if let Some(limit) = &response.headers().get("X-RateLimit-Limit") {
+            self.limit = limit
+                .to_str()
+                .unwrap()
+                .parse::<f64>()
+                .expect("unable to parse ratelimit") as isize;
         }
-        if let Some(remaining) = &response.header("X-RateLimit-Remaining") {
-            self.remaining = remaining.parse::<f64>().expect("unable to parse ratelimit") as isize;
+        if let Some(remaining) = &response.headers().get("X-RateLimit-Remaining") {
+            self.remaining = remaining
+                .to_str()
+                .unwrap()
+                .parse::<f64>()
+                .expect("unable to parse ratelimit") as isize;
         }
         if response.status() == 429 {
             let delay = response
-                .header("Retry-After")
+                .headers()
+                .get("Retry-After")
                 .expect("unable to parse ratelimit")
+                .to_str()
+                .unwrap()
                 .parse::<u64>()
                 .expect("unable to parse ratelimit")
                 + 100;

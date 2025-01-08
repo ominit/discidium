@@ -1,14 +1,10 @@
 #![allow(dead_code)] // TODO :(
 
-use std::{
-    io::Read,
-    net::TcpStream,
-    sync::{Arc, Mutex},
-};
+use std::io::Read;
 
 use anyhow::{Error, Result};
 use chrono::{DateTime, FixedOffset};
-use ureq::serde_json::{self, Map, Value};
+use serde_json::{Map, Value};
 
 use super::CDN_URL;
 
@@ -16,12 +12,52 @@ use super::CDN_URL;
 pub struct WrappedMap(Map<String, Value>);
 
 impl WrappedMap {
-    fn get(&mut self, key: &str) -> Option<WrappedValue> {
+    fn get<T, F: FnOnce(WrappedMap) -> Result<T>>(
+        &mut self,
+        key: &str,
+        decode: F,
+    ) -> Option<Result<T>> {
         let value = self.0.remove(key)?;
         if value.is_null() {
             return None;
         }
-        Some(WrappedValue(value))
+        Some(WrappedValue(value).to_decoder(decode))
+    }
+
+    fn get_value<T, F: FnOnce(WrappedValue) -> Result<T>>(
+        &mut self,
+        key: &str,
+        decode: F,
+    ) -> Option<Result<T>> {
+        let value = self.0.remove(key)?;
+        if value.is_null() {
+            return None;
+        }
+        Some(WrappedValue(value).to_value_decoder(decode))
+    }
+
+    fn get_array<T, F: Clone + Fn(WrappedMap) -> Result<T>>(
+        &mut self,
+        key: &str,
+        decode: F,
+    ) -> Option<Result<Vec<T>>> {
+        let value = self.0.remove(key)?;
+        if value.is_null() {
+            return None;
+        }
+        Some(WrappedValue(value).to_array_decoder(decode))
+    }
+
+    fn get_array_value<T, F: Clone + Fn(WrappedValue) -> Result<T>>(
+        &mut self,
+        key: &str,
+        decode: F,
+    ) -> Option<Result<Vec<T>>> {
+        let value = self.0.remove(key)?;
+        if value.is_null() {
+            return None;
+        }
+        Some(WrappedValue(value).to_array_value_decoder(decode))
     }
 
     /// type_name is used in the panic message
@@ -233,7 +269,9 @@ pub struct Emoji(pub String);
 
 impl Emoji {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        Ok(Self(map.get("name").unwrap().to_string()?))
+        Ok(Self(
+            map.get_value("name", WrappedValue::to_string).unwrap()?,
+        ))
     }
 }
 
@@ -250,19 +288,15 @@ pub struct ChannelCategory {
 
 impl ChannelCategory {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        let flags = map.get("flags").unwrap().to_u64()?;
-        let id = map.get("id").unwrap().to_value_decoder(ChannelId::decode)?;
-        let name = map.get("name").unwrap().to_string()?;
-        let parent_id = map
-            .get("parent_id")
-            .and_then(|x| Some(x.to_value_decoder(ChannelId::decode)))
-            .transpose()?;
+        let flags = map.get_value("flags", WrappedValue::to_u64).unwrap()?;
+        let id = map.get_value("id", ChannelId::decode).unwrap()?;
+        let name = map.get_value("name", WrappedValue::to_string).unwrap()?;
+        let parent_id = map.get_value("parent_id", ChannelId::decode).transpose()?;
         let permission_overwrites = map
-            .get("permission_overwrites")
-            .unwrap()
-            .to_array_decoder(PermissionOverwrite::decode)?;
-        let position = map.get("position").unwrap().to_u64()?;
-        let version = map.get("version").unwrap().to_u64()?;
+            .get_array("permission_overwrites", PermissionOverwrite::decode)
+            .unwrap()?;
+        let position = map.get_value("position", WrappedValue::to_u64).unwrap()?;
+        let version = map.get_value("version", WrappedValue::to_u64).unwrap()?;
         map.check_empty_panic("ChannelCategory");
         Ok(Self {
             flags,
@@ -284,11 +318,17 @@ pub enum PermissionOverwrite {
 
 impl PermissionOverwrite {
     pub fn decode(mut map: WrappedMap) -> Result<Self> {
-        Ok(match map.get("type").unwrap().to_string()?.as_str() {
-            "member" => PermissionOverwrite::Member(PermissionOverwriteMember::decode(map)?),
-            "role" => PermissionOverwrite::Role(PermissionOverwriteRole::decode(map)?),
-            other => todo!("{:?}", other),
-        })
+        Ok(
+            match map
+                .get_value("type", WrappedValue::to_string)
+                .unwrap()?
+                .as_str()
+            {
+                "member" => PermissionOverwrite::Member(PermissionOverwriteMember::decode(map)?),
+                "role" => PermissionOverwrite::Role(PermissionOverwriteRole::decode(map)?),
+                other => todo!("{:?}", other),
+            },
+        )
     }
 }
 
@@ -303,23 +343,11 @@ pub struct PermissionOverwriteMember {
 
 impl PermissionOverwriteMember {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        let allow = map
-            .get("allow")
-            .unwrap()
-            .to_value_decoder(Permission::decode)?;
-        let allow_new = map
-            .get("allow_new")
-            .unwrap()
-            .to_value_decoder(Permission::decode)?;
-        let deny = map
-            .get("deny")
-            .unwrap()
-            .to_value_decoder(Permission::decode)?;
-        let deny_new = map
-            .get("deny_new")
-            .unwrap()
-            .to_value_decoder(Permission::decode)?;
-        let id = map.get("id").unwrap().to_value_decoder(UserId::decode)?;
+        let allow = map.get_value("allow", Permission::decode).unwrap()?;
+        let allow_new = map.get_value("allow_new", Permission::decode).unwrap()?;
+        let deny = map.get_value("deny", Permission::decode).unwrap()?;
+        let deny_new = map.get_value("deny_new", Permission::decode).unwrap()?;
+        let id = map.get_value("id", UserId::decode).unwrap()?;
         map.check_empty_panic("PermissionOverwriteMember");
         Ok(Self {
             allow,
@@ -342,23 +370,11 @@ pub struct PermissionOverwriteRole {
 
 impl PermissionOverwriteRole {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        let allow = map
-            .get("allow")
-            .unwrap()
-            .to_value_decoder(Permission::decode)?;
-        let allow_new = map
-            .get("allow_new")
-            .unwrap()
-            .to_value_decoder(Permission::decode)?;
-        let deny = map
-            .get("deny")
-            .unwrap()
-            .to_value_decoder(Permission::decode)?;
-        let deny_new = map
-            .get("deny_new")
-            .unwrap()
-            .to_value_decoder(Permission::decode)?;
-        let id = map.get("id").unwrap().to_value_decoder(RoleId::decode)?;
+        let allow = map.get_value("allow", Permission::decode).unwrap()?;
+        let allow_new = map.get_value("allow_new", Permission::decode).unwrap()?;
+        let deny = map.get_value("deny", Permission::decode).unwrap()?;
+        let deny_new = map.get_value("deny_new", Permission::decode).unwrap()?;
+        let id = map.get_value("id", RoleId::decode).unwrap()?;
         map.check_empty_panic("PermissionOverwriteMember");
         Ok(Self {
             allow,
@@ -594,14 +610,12 @@ pub struct Server {
 impl Server {
     fn decode(mut map: WrappedMap) -> Result<Self> {
         let afk_channel_id = map
-            .get("afk_channel_id")
-            .and_then(|x| Some(x.to_value_decoder(ChannelId::decode)))
+            .get_value("afk_channel_id", ChannelId::decode)
             .transpose()?;
-        let afk_timeout = map.get("afk_timeout").unwrap().to_u64()?;
-        let channels = map
-            .get("channels")
-            .unwrap()
-            .to_array_decoder(Channel::decode)?;
+        let afk_timeout = map
+            .get_value("afk_timeout", WrappedValue::to_u64)
+            .unwrap()?;
+        let channels = map.get_array("channels", Channel::decode).unwrap()?;
         map.check_empty_panic("Server");
         Ok(Self {
             afk_channel_id,
@@ -650,7 +664,7 @@ pub struct User {
     pub discriminator: u16,
     pub global_name: Option<String>,
     pub id: UserId,
-    pub primary_guild: Option<Clan>,
+    // pub primary_guild: Option<Clan>,
     pub public_flags: Option<u64>,
     pub system: Option<bool>,
     pub username: String,
@@ -659,41 +673,32 @@ pub struct User {
 impl User {
     fn decode(mut map: WrappedMap) -> Result<Self> {
         let avatar = map
-            .get("avatar")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("avatar", WrappedValue::to_string)
             .transpose()?;
         let avatar_decoration_data = map
-            .get("avatar_decoration_data")
-            .and_then(|x| Some(x.to_decoder(AvatarDecorationData::decode)))
+            .get("avatar_decoration_data", AvatarDecorationData::decode)
             .transpose()?;
-        let bot = map.get("bot").and_then(|x| Some(x.to_bool())).transpose()?;
-        let clan = map
-            .get("clan")
-            .and_then(|x| Some(x.to_decoder(Clan::decode)))
-            .transpose()?;
+        let bot = map.get_value("bot", WrappedValue::to_bool).transpose()?;
+        let clan = map.get("clan", Clan::decode).transpose()?;
         let discriminator = map
-            .get("discriminator")
-            .unwrap()
-            .to_string()?
+            .get_value("discriminator", WrappedValue::to_string)
+            .unwrap()?
             .parse::<u16>()?;
         let global_name = map
-            .get("global_name")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("global_name", WrappedValue::to_string)
             .transpose()?;
-        let id = map.get("id").unwrap().to_value_decoder(UserId::decode)?;
-        let primary_guild = map
-            .get("primary_guild")
-            .and_then(|x| Some(x.to_decoder(Clan::decode)))
-            .transpose()?;
+        let id = map.get_value("id", UserId::decode).unwrap()?;
+        // let primary_guild = map
+        //     .get("primary_guild")
+        //     .and_then(|x| Some(x.to_decoder(Clan::decode)))
+        //     .transpose()?;
         let public_flags = map
-            .get("public_flags")
-            .and_then(|x| Some(x.to_u64()))
+            .get_value("public_flags", WrappedValue::to_u64)
             .transpose()?;
-        let system = map
-            .get("system")
-            .and_then(|x| Some(x.to_bool()))
-            .transpose()?;
-        let username = map.get("username").unwrap().to_string()?;
+        let system = map.get_value("system", WrappedValue::to_bool).transpose()?;
+        let username = map
+            .get_value("username", WrappedValue::to_string)
+            .unwrap()?;
         map.check_empty_panic("User");
         Ok(Self {
             avatar,
@@ -703,7 +708,7 @@ impl User {
             discriminator,
             global_name,
             id,
-            primary_guild,
+            // primary_guild,
             public_flags,
             system,
             username,
@@ -736,18 +741,15 @@ pub struct Clan {
 impl Clan {
     fn decode(mut map: WrappedMap) -> Result<Self> {
         let badge = map
-            .get("badge")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("badge", WrappedValue::to_string)
             .transpose()?;
-        let identity_enabled = map.get("identity_enabled").unwrap().to_bool()?;
+        let identity_enabled = map
+            .get_value("identity_enabled", WrappedValue::to_bool)
+            .unwrap()?;
         let identity_guild_id = map
-            .get("identity_guild_id")
-            .and_then(|x| Some(x.to_value_decoder(ServerId::decode)))
+            .get_value("identity_guild_id", ServerId::decode)
             .transpose()?;
-        let tag = map
-            .get("tag")
-            .and_then(|x| Some(x.to_string()))
-            .transpose()?;
+        let tag = map.get_value("tag", WrappedValue::to_string).transpose()?;
         map.check_empty_panic("Clan");
         Ok(Self {
             badge,
@@ -767,12 +769,11 @@ pub struct AvatarDecorationData {
 
 impl AvatarDecorationData {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        let asset = map.get("asset").unwrap().to_string()?;
+        let asset = map.get_value("asset", WrappedValue::to_string).unwrap()?;
         let expires_at = map
-            .get("expires_at")
-            .and_then(|x| Some(x.to_u64()))
+            .get_value("expires_at", WrappedValue::to_u64)
             .transpose()?;
-        let sku_id = map.get("sku_id").unwrap().to_string()?;
+        let sku_id = map.get_value("sku_id", WrappedValue::to_string).unwrap()?;
         map.check_empty_panic("AvatarDecorationData");
         Ok(Self {
             asset,
@@ -806,6 +807,7 @@ pub enum Channel {
     Group(Group),
     Private(PrivateChannel),
     Public(PublicChannel),
+    Voice(VoiceChannel),
     Category(ChannelCategory),
     News,
     Store,
@@ -813,19 +815,14 @@ pub enum Channel {
 
 impl Channel {
     pub fn decode(mut map: WrappedMap) -> Result<Self> {
-        Ok(
-            match map
-                .get("type")
-                .unwrap()
-                .to_value_decoder(ChannelType::decode)?
-            {
-                ChannelType::Public => Channel::Public(PublicChannel::decode(map)?),
-                ChannelType::Private => Channel::Private(PrivateChannel::decode(map)?),
-                ChannelType::Group => Channel::Group(Group::decode(map)?),
-                ChannelType::Category => Channel::Category(ChannelCategory::decode(map)?),
-                other => todo!("{:?}", other),
-            },
-        )
+        Ok(match map.get_value("type", ChannelType::decode).unwrap()? {
+            ChannelType::Group => Channel::Group(Group::decode(map)?),
+            ChannelType::Private => Channel::Private(PrivateChannel::decode(map)?),
+            ChannelType::Public => Channel::Public(PublicChannel::decode(map)?),
+            ChannelType::Voice => Channel::Voice(VoiceChannel::decode(map)?),
+            ChannelType::Category => Channel::Category(ChannelCategory::decode(map)?),
+            other => todo!("{:?}", other),
+        })
     }
 }
 
@@ -884,36 +881,23 @@ pub struct Group {
 impl Group {
     fn decode(mut map: WrappedMap) -> Result<Self> {
         let blocked_user_warning_dismissed = map
-            .get("blocked_user_warning_dismissed")
-            .unwrap()
-            .to_bool()?;
-        let flags = map.get("flags").unwrap().to_u64()?;
-        let icon = map
-            .get("icon")
-            .and_then(|x| Some(x.to_string()))
-            .transpose()?;
-        let id = map.get("id").unwrap().to_value_decoder(ChannelId::decode)?;
+            .get_value("blocked_user_warning_dismissed", WrappedValue::to_bool)
+            .unwrap()?;
+        let flags = map.get_value("flags", WrappedValue::to_u64).unwrap()?;
+        let icon = map.get_value("icon", WrappedValue::to_string).transpose()?;
+        let id = map.get_value("id", ChannelId::decode).unwrap()?;
         let last_message_id = map
-            .get("last_message_id")
-            .unwrap()
-            .to_value_decoder(MessageId::decode)?;
+            .get_value("last_message_id", MessageId::decode)
+            .unwrap()?;
         let last_pin_timestamp = map
-            .get("last_pin_timestamp")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("last_pin_timestamp", WrappedValue::to_string)
             .transpose()?;
-        let name = map
-            .get("name")
-            .and_then(|x| Some(x.to_string()))
-            .transpose()?;
-        let owner_id = map
-            .get("owner_id")
-            .unwrap()
-            .to_value_decoder(UserId::decode)?;
-        let recipient_flags = map.get("recipient_flags").unwrap().to_u64()?;
-        let recipients = map
-            .get("recipients")
-            .unwrap()
-            .to_array_decoder(User::decode)?;
+        let name = map.get_value("name", WrappedValue::to_string).transpose()?;
+        let owner_id = map.get_value("owner_id", UserId::decode).unwrap()?;
+        let recipient_flags = map
+            .get_value("recipient_flags", WrappedValue::to_u64)
+            .unwrap()?;
+        let recipients = map.get_array("recipients", User::decode).unwrap()?;
         map.check_empty_panic("Group");
         Ok(Self {
             blocked_user_warning_dismissed,
@@ -954,15 +938,6 @@ impl Group {
     }
 }
 
-pub struct Call {
-    // pub channel_id: ChannelId,
-    // pub message_id: MessageId,
-    // pub region: String,
-    // pub ringring: Vec<UserId>,
-    // pub unavailable: bool,
-    // pub voice_states: Vec<VoiceState>,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrivateChannel {
     pub flags: u64,
@@ -979,34 +954,33 @@ pub struct PrivateChannel {
 
 impl PrivateChannel {
     pub fn decode(mut map: WrappedMap) -> Result<Self> {
-        let flags = map.get("flags").unwrap().to_u64()?;
-        let id = map.get("id").unwrap().to_value_decoder(ChannelId::decode)?;
-        let is_message_request = map.get("is_message_request").unwrap().to_bool()?;
+        let flags = map.get_value("flags", WrappedValue::to_u64).unwrap()?;
+        let id = map.get_value("id", ChannelId::decode).unwrap()?;
+        let is_message_request = map
+            .get_value("is_message_request", WrappedValue::to_bool)
+            .unwrap()?;
         let is_message_request_timestamp = map
-            .get("is_message_request_timestamp")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("is_message_request_timestamp", WrappedValue::to_string)
             .transpose()?;
-        let is_spam = map.get("is_spam").unwrap().to_bool()?;
+        let is_spam = map.get_value("is_spam", WrappedValue::to_bool).unwrap()?;
         let last_message_id = map
-            .get("last_message_id")
-            .and_then(|x| Some(x.to_value_decoder(MessageId::decode)))
+            .get_value("last_message_id", MessageId::decode)
             .transpose()?;
         let last_pin_timestamp = map
-            .get("last_pin_timestamp")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("last_pin_timestamp", WrappedValue::to_string)
             .transpose()?;
-        let recipient_flags = map.get("recipient_flags").unwrap().to_u64()?;
+        let recipient_flags = map
+            .get_value("recipient_flags", WrappedValue::to_u64)
+            .unwrap()?;
         let recipient = map
-            .get("recipients")
-            .unwrap()
-            .to_array_decoder(User::decode)?
+            .get_array("recipients", User::decode)
+            .unwrap()?
             .first()
             .unwrap()
             .clone(); // TODO
         let safety_warnings = map
-            .get("safety_warnings")
-            .unwrap()
-            .to_array_value_decoder(|x| x.to_string())?;
+            .get_array_value("safety_warnings", WrappedValue::to_string)
+            .unwrap()?;
         map.check_empty_panic("PrivateChannel");
         Ok(Self {
             flags,
@@ -1029,35 +1003,34 @@ pub struct PublicChannel {
     pub id: ChannelId,
     pub last_message_id: Option<MessageId>,
     pub name: String,
-    pub parent_id: ChannelId,
-    // pub permission_overwrites: PermissionOverwrite,
+    pub parent_id: Option<ChannelId>,
+    pub permission_overwrites: Vec<PermissionOverwrite>,
     pub position: u64,
     pub rate_limit_per_user: u64,
-    pub topic: String,
+    pub topic: Option<String>,
     pub version: u64,
 }
 
 impl PublicChannel {
     pub fn decode(mut map: WrappedMap) -> Result<Self> {
-        let flags = map.get("flags").unwrap().to_u64()?;
-        let id = map.get("id").unwrap().to_value_decoder(ChannelId::decode)?;
+        let flags = map.get_value("flags", WrappedValue::to_u64).unwrap()?;
+        let id = map.get_value("id", ChannelId::decode).unwrap()?;
         let last_message_id = map
-            .get("last_message_id")
-            .and_then(|x| Some(x.to_value_decoder(MessageId::decode)))
+            .get_value("last_message_id", MessageId::decode)
             .transpose()?;
-        let name = map.get("name").unwrap().to_string()?;
-        let parent_id = map
-            .get("parent_id")
-            .unwrap()
-            .to_value_decoder(ChannelId::decode)?;
-        // let permission_overwrites = map
-        //     .get("permission_overwrites")
-        //     .unwrap()
-        //     .to_decoder(PermissionOverwrite::decode)?;
-        let position = map.get("position").unwrap().to_u64()?;
-        let rate_limit_per_user = map.get("rate_limit_per_user").unwrap().to_u64()?;
-        let topic = map.get("topic").unwrap().to_string()?;
-        let version = map.get("version").unwrap().to_u64()?;
+        let name = map.get_value("name", WrappedValue::to_string).unwrap()?;
+        let parent_id = map.get_value("parent_id", ChannelId::decode).transpose()?;
+        let permission_overwrites = map
+            .get_array("permission_overwrites", PermissionOverwrite::decode)
+            .unwrap()?;
+        let position = map.get_value("position", WrappedValue::to_u64).unwrap()?;
+        let rate_limit_per_user = map
+            .get_value("rate_limit_per_user", WrappedValue::to_u64)
+            .unwrap()?;
+        let topic = map
+            .get_value("topic", WrappedValue::to_string)
+            .transpose()?;
+        let version = map.get_value("version", WrappedValue::to_u64).unwrap()?;
         map.check_empty_panic("PublicChannel");
         Ok(Self {
             flags,
@@ -1065,7 +1038,7 @@ impl PublicChannel {
             last_message_id,
             name,
             parent_id,
-            // permission_overwrites,
+            permission_overwrites,
             position,
             rate_limit_per_user,
             topic,
@@ -1080,6 +1053,62 @@ impl PublicChannel {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct VoiceChannel {
+    pub bitrate: u64,
+    pub flags: u64,
+    pub id: ChannelId,
+    pub last_message_id: Option<MessageId>,
+    pub name: String,
+    pub parent_id: Option<ChannelId>,
+    pub permission_overwrites: Vec<PermissionOverwrite>,
+    pub position: u64,
+    pub rate_limit_per_user: u64,
+    pub rtc_region: Option<String>,
+    pub user_limit: u64,
+    pub version: u64,
+}
+
+impl VoiceChannel {
+    pub fn decode(mut map: WrappedMap) -> Result<Self> {
+        let bitrate = map.get_value("bitrate", WrappedValue::to_u64).unwrap()?;
+        let flags = map.get_value("flags", WrappedValue::to_u64).unwrap()?;
+        let id = map.get_value("id", ChannelId::decode).unwrap()?;
+        let last_message_id = map
+            .get_value("last_message_id", MessageId::decode)
+            .transpose()?;
+        let name = map.get_value("name", WrappedValue::to_string).unwrap()?;
+        let parent_id = map.get_value("parent_id", ChannelId::decode).transpose()?;
+        let permission_overwrites = map
+            .get_array("permission_overwrites", PermissionOverwrite::decode)
+            .unwrap()?;
+        let position = map.get_value("position", WrappedValue::to_u64).unwrap()?;
+        let rate_limit_per_user = map
+            .get_value("rate_limit_per_user", WrappedValue::to_u64)
+            .unwrap()?;
+        let rtc_region = map
+            .get_value("rtc_region", WrappedValue::to_string)
+            .transpose()?;
+        let user_limit = map.get_value("user_limit", WrappedValue::to_u64).unwrap()?;
+        let version = map.get_value("version", WrappedValue::to_u64).unwrap()?;
+        map.check_empty_panic("VoiceChannel");
+        Ok(Self {
+            bitrate,
+            flags,
+            id,
+            last_message_id,
+            name,
+            parent_id,
+            permission_overwrites,
+            position,
+            rate_limit_per_user,
+            rtc_region,
+            user_limit,
+            version,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct CurrentUser {
     pub accent_color: Option<u64>,
     pub avatar: String,
@@ -1087,7 +1116,7 @@ pub struct CurrentUser {
     pub banner: Option<String>,
     pub banner_color: Option<String>,
     pub bio: String,
-    pub clan: Option<String>,
+    pub clan: Option<Clan>,
     pub desktop: bool,
     pub discriminator: u16,
     pub email: String,
@@ -1111,61 +1140,61 @@ pub struct CurrentUser {
 impl CurrentUser {
     fn decode(mut map: WrappedMap) -> Result<Self> {
         let accent_color = map
-            .get("accent_color")
-            .and_then(|x| Some(x.to_u64()))
+            .get_value("accent_color", WrappedValue::to_u64)
             .transpose()?;
-        let avatar = map.get("avatar").unwrap().to_string()?;
+        let avatar = map.get_value("avatar", WrappedValue::to_string).unwrap()?;
         let avatar_decoration_data = map
-            .get("avatar_decoration_data")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("avatar_decoration_data", WrappedValue::to_string)
             .transpose()?;
         let banner = map
-            .get("banner")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("banner", WrappedValue::to_string)
             .transpose()?;
         let banner_color = map
-            .get("banner_color")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("banner_color", WrappedValue::to_string)
             .transpose()?;
-        let bio = map.get("bio").unwrap().to_string()?;
-        let clan = map
-            .get("clan")
-            .and_then(|x| Some(x.to_string()))
-            .transpose()?;
-        let desktop = map.get("desktop").unwrap().to_bool()?;
+        let bio = map.get_value("bio", WrappedValue::to_string).unwrap()?;
+        let clan = map.get("clan", Clan::decode).transpose()?;
+        let desktop = map.get_value("desktop", WrappedValue::to_bool).unwrap()?;
         let discriminator = map
-            .get("discriminator")
-            .unwrap()
-            .to_string()?
+            .get_value("discriminator", WrappedValue::to_string)
+            .unwrap()?
             .parse::<u16>()?;
-        let email = map.get("email").unwrap().to_string()?;
-        let flags = map.get("flags").unwrap().to_u64()?;
+        let email = map.get_value("email", WrappedValue::to_string).unwrap()?;
+        let flags = map.get_value("flags", WrappedValue::to_u64).unwrap()?;
         let global_name = map
-            .get("global_name")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("global_name", WrappedValue::to_string)
             .transpose()?;
-        let id = map.get("id").unwrap().to_value_decoder(UserId::decode)?;
-        let mfa_enabled = map.get("mfa_enabled").unwrap().to_bool()?;
-        let mobile = map.get("mobile").unwrap().to_bool()?;
-        let nsfw_allowed = map.get("nsfw_allowed").unwrap().to_bool()?;
+        let id = map.get_value("id", UserId::decode).unwrap()?;
+        let mfa_enabled = map
+            .get_value("mfa_enabled", WrappedValue::to_bool)
+            .unwrap()?;
+        let mobile = map.get_value("mobile", WrappedValue::to_bool).unwrap()?;
+        let nsfw_allowed = map
+            .get_value("nsfw_allowed", WrappedValue::to_bool)
+            .unwrap()?;
         let phone = map
-            .get("phone")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("phone", WrappedValue::to_string)
             .transpose()?;
-        let premium = map.get("premium").unwrap().to_bool()?;
-        let premium_type = map.get("premium_type").unwrap().to_u64()?;
+        let premium = map.get_value("premium", WrappedValue::to_bool).unwrap()?;
+        let premium_type = map
+            .get_value("premium_type", WrappedValue::to_u64)
+            .unwrap()?;
         let primary_guild = map
-            .get("primary_guild")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("primary_guild", WrappedValue::to_string)
             .transpose()?;
-        let pronouns = map.get("pronouns").unwrap().to_string()?;
+        let pronouns = map
+            .get_value("pronouns", WrappedValue::to_string)
+            .unwrap()?;
         let public_flags = map
-            .get("public_flags")
-            .and_then(|x| Some(x.to_u64()))
+            .get_value("public_flags", WrappedValue::to_u64)
             .transpose()?;
-        let purchased_flags = map.get("purchased_flags").unwrap().to_u64()?;
-        let username = map.get("username").unwrap().to_string()?;
-        let verified = map.get("verified").unwrap().to_bool()?;
+        let purchased_flags = map
+            .get_value("purchased_flags", WrappedValue::to_u64)
+            .unwrap()?;
+        let username = map
+            .get_value("username", WrappedValue::to_string)
+            .unwrap()?;
+        let verified = map.get_value("verified", WrappedValue::to_bool).unwrap()?;
         map.check_empty_panic("CurrentUser");
         Ok(Self {
             accent_color,
@@ -1210,19 +1239,19 @@ pub struct Relationship {
 
 impl Relationship {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        let id = map.get("id").unwrap().to_value_decoder(UserId::decode)?;
-        let is_spam_request = map.get("is_spam_request").unwrap().to_bool()?;
+        let id = map.get_value("id", UserId::decode).unwrap()?;
+        let is_spam_request = map
+            .get_value("is_spam_request", WrappedValue::to_bool)
+            .unwrap()?;
         let nickname = map
-            .get("nickname")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("nickname", WrappedValue::to_string)
             .transpose()?;
-        let since = map.get("since").unwrap().to_string()?;
-        let type_relationship = map
-            .get("type")
-            .unwrap()
-            .to_value_decoder(RelationshipType::decode)?;
-        let user = map.get("user").unwrap().to_decoder(User::decode)?;
-        let user_ignored = map.get("user_ignored").unwrap().to_bool()?;
+        let since = map.get_value("since", WrappedValue::to_string).unwrap()?;
+        let type_relationship = map.get_value("type", RelationshipType::decode).unwrap()?;
+        let user = map.get("user", User::decode).unwrap()?;
+        let user_ignored = map
+            .get_value("user_ignored", WrappedValue::to_bool)
+            .unwrap()?;
         map.check_empty_panic("Relationship");
         Ok(Self {
             id,
@@ -1271,23 +1300,19 @@ pub struct Presence {
 impl Presence {
     fn decode(mut map: WrappedMap) -> Result<Self> {
         let activities = map
-            .get("activities")
-            .unwrap()
-            .to_array_decoder(PresenceActivity::decode)?;
+            .get_array("activities", PresenceActivity::decode)
+            .unwrap()?;
         let client_status = map
-            .get("client_status")
-            .unwrap()
-            .to_decoder(PresenceClientStatus::decode)?;
-        let last_modified = map.get("last_modified").unwrap().to_u64()?;
+            .get("client_status", PresenceClientStatus::decode)
+            .unwrap()?;
+        let last_modified = map
+            .get_value("last_modified", WrappedValue::to_u64)
+            .unwrap()?;
         let restricted_application_id = map
-            .get("restricted_application_id")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("restricted_application_id", WrappedValue::to_string)
             .transpose()?;
-        let status = map
-            .get("status")
-            .unwrap()
-            .to_value_decoder(Status::decode)?;
-        let user = map.get("user").unwrap().to_decoder(User::decode)?;
+        let status = map.get_value("status", Status::decode).unwrap()?;
+        let user = map.get("user", User::decode).unwrap()?;
         map.check_empty_panic("Presence");
         Ok(Self {
             activities,
@@ -1329,18 +1354,9 @@ pub struct PresenceClientStatus {
 
 impl PresenceClientStatus {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        let desktop = map
-            .get("desktop")
-            .and_then(|x| Some(x.to_value_decoder(Status::decode)))
-            .transpose()?;
-        let mobile = map
-            .get("mobile")
-            .and_then(|x| Some(x.to_value_decoder(Status::decode)))
-            .transpose()?;
-        let web = map
-            .get("web")
-            .and_then(|x| Some(x.to_value_decoder(Status::decode)))
-            .transpose()?;
+        let desktop = map.get_value("desktop", Status::decode).transpose()?;
+        let mobile = map.get_value("mobile", Status::decode).transpose()?;
+        let web = map.get_value("web", Status::decode).transpose()?;
         map.check_empty_panic("PresenceClientStatus");
         Ok(Self {
             desktop,
@@ -1371,49 +1387,33 @@ pub struct PresenceActivity {
 impl PresenceActivity {
     fn decode(mut map: WrappedMap) -> Result<Self> {
         let application_id = map
-            .get("application_id")
-            .and_then(|x| Some(x.to_value_decoder(ApplicationId::decode)))
+            .get_value("application_id", ApplicationId::decode)
             .transpose()?;
         let assets = map
-            .get("assets")
-            .and_then(|x| Some(x.to_decoder(PresenceActivityAsset::decode)))
+            .get("assets", PresenceActivityAsset::decode)
             .transpose()?;
-        let created_at = map.get("created_at").unwrap().to_u64()?;
+        let created_at = map.get_value("created_at", WrappedValue::to_u64).unwrap()?;
         let details = map
-            .get("details")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("details", WrappedValue::to_string)
             .transpose()?;
-        let emoji = map
-            .get("emoji")
-            .and_then(|x| Some(x.to_decoder(Emoji::decode)))
-            .transpose()?;
-        let flags = map
-            .get("flags")
-            .and_then(|x| Some(x.to_u64()))
-            .transpose()?;
-        let id = map.get("id").unwrap().to_string()?;
-        let name = map.get("name").unwrap().to_string()?;
+        let emoji = map.get("emoji", Emoji::decode).transpose()?;
+        let flags = map.get_value("flags", WrappedValue::to_u64).transpose()?;
+        let id = map.get_value("id", WrappedValue::to_string).unwrap()?; // TODO
+        let name = map.get_value("name", WrappedValue::to_string).unwrap()?;
         let party = map
-            .get("party")
-            .and_then(|x| Some(x.to_decoder(PresenceActivityParty::decode)))
+            .get("party", PresenceActivityParty::decode)
             .transpose()?;
         let session_id = map
-            .get("session_id")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("session_id", WrappedValue::to_string)
             .transpose()?;
         let state = map
-            .get("state")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("state", WrappedValue::to_string)
             .transpose()?;
         let sync_id = map
-            .get("sync_id")
-            .and_then(|x| Some(x.to_string()))
+            .get_value("sync_id", WrappedValue::to_string)
             .transpose()?;
-        let type_activity = map.get("type").unwrap().to_u64()?;
-        let timestamp = map
-            .get("timestamps")
-            .and_then(|x| Some(x.to_decoder(Timestamp::decode)))
-            .transpose()?;
+        let type_activity = map.get_value("type", WrappedValue::to_u64).unwrap()?;
+        let timestamp = map.get("timestamps", Timestamp::decode).transpose()?;
         map.check_empty_panic("PresenceActivity");
         Ok(Self {
             application_id,
@@ -1442,11 +1442,8 @@ struct Timestamp {
 
 impl Timestamp {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        let end = map.get("end").and_then(|x| Some(x.to_u64())).transpose()?;
-        let start = map
-            .get("start")
-            .and_then(|x| Some(x.to_u64()))
-            .transpose()?;
+        let end = map.get_value("end", WrappedValue::to_u64).transpose()?;
+        let start = map.get_value("start", WrappedValue::to_u64).transpose()?;
         map.check_empty_panic("Timestamp");
         Ok(Self { end, start })
     }
@@ -1459,7 +1456,7 @@ pub struct PresenceActivityParty {
 
 impl PresenceActivityParty {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        let id = map.get("id").unwrap().to_string()?;
+        let id = map.get_value("id", WrappedValue::to_string).unwrap()?;
         map.check_empty_panic("PresenceActivityParty");
         Ok(Self { id })
     }
@@ -1473,8 +1470,12 @@ pub struct PresenceActivityAsset {
 
 impl PresenceActivityAsset {
     fn decode(mut map: WrappedMap) -> Result<Self> {
-        let large_image = map.get("large_image").unwrap().to_string()?;
-        let large_text = map.get("large_text").unwrap().to_string()?;
+        let large_image = map
+            .get_value("large_image", WrappedValue::to_string)
+            .unwrap()?;
+        let large_text = map
+            .get_value("large_text", WrappedValue::to_string)
+            .unwrap()?;
         map.check_empty_panic("PresenceActivityAsset");
         Ok(Self {
             large_image,
@@ -1495,52 +1496,60 @@ pub struct ReadyEvent {
 
 impl ReadyEvent {
     pub fn decode(mut map: WrappedMap) -> Result<Self> {
-        map.get("_trace");
-        map.get("analytics_token");
-        map.get("api_code_version");
-        map.get("auth");
-        map.get("auth_session_id_hash");
-        map.get("broadcaster_user_ids");
-        map.get("connected_accounts");
-        map.get("consents");
-        map.get("country_code");
-        map.get("experiments");
-        map.get("explicit_content_scan_version");
-        map.get("friend_suggestion_count");
-        map.get("game_relationships");
-        map.get("geo_ordered_rtc_regions");
-        map.get("guild_experiments");
-        map.get("guild_join_requests");
-        let servers = map
-            .get("guilds")
-            .unwrap()
-            .to_array_decoder(Server::decode)?;
-        map.get("notes");
-        map.get("notification_settings");
-        let presences = map
-            .get("presences")
-            .unwrap()
-            .to_array_decoder(Presence::decode)?;
+        map.get("_trace", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("analytics_token", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("api_code_version", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("auth", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("auth_session_id_hash", |_| {
+            Err::<u32, Error>(Error::msg(""))
+        });
+        map.get("broadcaster_user_ids", |_| {
+            Err::<u32, Error>(Error::msg(""))
+        });
+        map.get("connected_accounts", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("consents", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("country_code", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("experiments", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("explicit_content_scan_version", |_| {
+            Err::<u32, Error>(Error::msg(""))
+        });
+        map.get("friend_suggestion_count", |_| {
+            Err::<u32, Error>(Error::msg(""))
+        });
+        map.get("game_relationships", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("geo_ordered_rtc_regions", |_| {
+            Err::<u32, Error>(Error::msg(""))
+        });
+        map.get("guild_experiments", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("guild_join_requests", |_| Err::<u32, Error>(Error::msg("")));
+        let servers = map.get_array("guilds", Server::decode).unwrap()?;
+        map.get("notes", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("notification_settings", |_| {
+            Err::<u32, Error>(Error::msg(""))
+        });
+        let presences = map.get_array("presences", Presence::decode).unwrap()?;
         let private_channels = map
-            .get("private_channels")
-            .unwrap()
-            .to_array_decoder(Channel::decode)?;
-        map.get("read_state");
+            .get_array("private_channels", Channel::decode)
+            .unwrap()?;
+        map.get("read_state", |_| Err::<u32, Error>(Error::msg("")));
         let relationships = map
-            .get("relationships")
-            .unwrap()
-            .to_array_decoder(Relationship::decode)?;
-        map.get("resume_gateway_url");
-        let session_id = map.get("session_id").unwrap().to_string()?;
-        map.get("session_type");
-        map.get("sessions");
-        map.get("static_client_session_id");
-        map.get("tutorial");
-        let user = map.get("user").unwrap().to_decoder(CurrentUser::decode)?;
-        map.get("user_guild_settings");
-        map.get("user_settings");
-        map.get("user_settings_proto");
-        let v = map.get("v").unwrap().to_u64()?;
+            .get_array("relationships", Relationship::decode)
+            .unwrap()?;
+        map.get("resume_gateway_url", |_| Err::<u32, Error>(Error::msg("")));
+        let session_id = map
+            .get_value("session_id", WrappedValue::to_string)
+            .unwrap()?;
+        map.get("session_type", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("sessions", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("static_client_session_id", |_| {
+            Err::<u32, Error>(Error::msg(""))
+        });
+        map.get("tutorial", |_| Err::<u32, Error>(Error::msg("")));
+        let user = map.get("user", CurrentUser::decode).unwrap()?;
+        map.get("user_guild_settings", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("user_settings", |_| Err::<u32, Error>(Error::msg("")));
+        map.get("user_settings_proto", |_| Err::<u32, Error>(Error::msg("")));
+        let v = map.get_value("v", WrappedValue::to_u64).unwrap()?;
         map.check_empty_panic("ReadyEvent");
         Ok(Self {
             presences,
@@ -1584,32 +1593,33 @@ pub enum GatewayEvent {
 impl GatewayEvent {
     pub fn decode(mut map: WrappedMap) -> Result<Self> {
         Ok(
-            match map.get("op").expect("op is null in GatewayEvent").to_u64() {
+            match map
+                .get_value("op", WrappedValue::to_u64)
+                .expect("op is null in GatewayEvent")
+            {
                 Ok(0) => GatewayEvent::Dispatch(
-                    map.get("s")
-                        .expect("s not found in websocket message")
-                        .to_u64()? as usize,
+                    map.get_value("s", WrappedValue::to_u64)
+                        .expect("s not found in websocket message")? as usize,
                     Event::decode(
-                        &map.get("t")
-                            .expect("t not found in websocket message")
-                            .to_string()?,
-                        map.get("d").expect("d not found in websocket message"),
+                        &map.get_value("t", WrappedValue::to_string)
+                            .expect("t not found in websocket message")?,
+                        map.get_value("d", |x| Ok(x))
+                            .expect("d not found in websocket message")?,
                     )?,
                 ),
                 Ok(1) => GatewayEvent::Heartbeat(
-                    map.get("s")
-                        .expect("s not found in websocket message")
-                        .to_u64()? as usize,
+                    map.get_value("s", WrappedValue::to_u64)
+                        .expect("s not found in websocket message")? as usize,
                 ),
                 Ok(7) => GatewayEvent::Reconnect,
                 Ok(9) => GatewayEvent::InvalidateSession,
                 Ok(10) => GatewayEvent::Hello(
-                    map.get("d")
-                        .expect("d not found in websocket message")
-                        .to_map()?
-                        .get("heartbeat_interval")
-                        .expect("heartbeat_interval not found in websocket message")
-                        .to_u64()? as usize,
+                    map.get_value("d", |x| {
+                        x.to_map()?
+                            .get_value("heartbeat_interval", WrappedValue::to_u64)
+                            .expect("heartbeat_interval not found in websocket message")
+                    })
+                    .expect("d not found in websocket message")? as usize,
                 ),
                 Ok(11) => Self::HeartbeatAck,
                 _ => return Err(Error::msg("unexpected opcode")),
@@ -1640,7 +1650,7 @@ where
                     flate2::read::ZlibDecoder::new(&bin[..]).read_to_end(&mut vec)?;
                     &vec[..]
                 };
-                ureq::serde_json::from_reader(text)
+                serde_json::from_reader(text)
                     .map_err(From::from)
                     .and_then(|x| WrappedValue(x).to_decoder(decode))
                     .map_err(|e| e)
