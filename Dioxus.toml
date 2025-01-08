@@ -2,6 +2,7 @@
 
 # App (Project) Name
 name = "discidium"
+out_dir = "dist"
 
 [web.app]
 
