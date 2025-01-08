@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Dioxus Deploy
-        uses: DioxusLabs/deploy-action@0.1.1
+        uses: DioxusLabs/deploy-action@4f933485ec8f37a9dc1beec181f4eba58789523e
         with:
           # dioxus-cli install repo [default: 'DioxusLabs/cli']
           toolSource: DioxusLabs/cli
