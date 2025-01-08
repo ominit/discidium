@@ -8,7 +8,10 @@ edition = "2021"
 anyhow = "1.0.95"
 chrono = { version = "0.4.39", features = ["serde"] }
 dioxus = { version = "0.6.1" }
-ewebsock = { git = "https://github.com/c-git/ewebsock/", branch = "wss_support", features = ["tls", "rustls_ring"], optional = true }
+ewebsock = { git = "https://github.com/c-git/ewebsock/", branch = "wss_support", features = [
+  "tls",
+  "rustls_ring",
+], optional = true }
 flate2 = "1.0.35"
 futures = "0.3.31"
 js-sys = { version = "0.3.76", optional = true }
@@ -33,7 +36,7 @@ web-sys = { version = "0.3.76", features = [
 whoami = "1.5.2"
 
 [features]
-default = ["web"]
+default = ["desktop"]
 web = ["dioxus/web", "dep:web-sys", "dep:wasm-bindgen", "dep:js-sys"]
 desktop = ["dioxus/desktop", "dep:ewebsock"]
 # mobile = ["dioxus/mobile"]

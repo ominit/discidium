@@ -20,6 +20,7 @@
     ...
   }:
     flake-utils.lib.eachDefaultSystem (system: let
+      lib = nixpkgs.lib;
       pkgs = import nixpkgs {
         inherit system;
         overlays = [(import rust-overlay)];
@@ -32,15 +33,29 @@
       ];
 
       buildInputs = with pkgs; [
+        at-spi2-atk
+        atkmm
+        cairo
+        gdk-pixbuf
+        glib
+        gtk3
+        harfbuzz
+        librsvg
+        libsoup_3
+        pango
+        webkitgtk_4_1
         openssl
-        wayland
-        libxkbcommon
-        libGL
       ];
 
       discidium = craneLib.buildPackage {
         name = "discidium";
-        src = craneLib.cleanCargoSource ./.;
+        src = lib.cleanSourceWith {
+          src = self;
+          filter = path: type:
+            (lib.hasSuffix "\.html" path)
+            || (lib.hasInfix "/assets/" path)
+            || (craneLib.filterCargoSources path type);
+        };
         inherit buildInputs nativeBuildInputs;
 
         postInstall = ''
@@ -55,8 +70,11 @@
       };
 
       devShell = pkgs.mkShell {
-        inherit nativeBuildInputs buildInputs;
+        # inherit buildInputs;
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
+        packages = with pkgs; [
+          dioxus-cli
+        ];
         # RUST_BACKTRACE = 1;
       };
     });
