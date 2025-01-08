@@ -3,8 +3,11 @@ use std::{
     sync::{mpsc, Arc, Mutex},
 };
 
+#[cfg(feature = "web")]
+use crate::api::websocket::{connect, Options, WsEvent, WsMessage, WsReceiver, WsSender};
 use anyhow::{Error, Result};
-use ewebsock::Options;
+#[cfg(feature = "desktop")]
+use ewebsock::{connect, Options, WsEvent, WsMessage, WsReceiver, WsSender};
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
 
@@ -14,7 +17,7 @@ use super::model::{ReadyEvent, UserId};
 
 pub struct Connection {
     keepalive_sender: mpsc::Sender<Status>,
-    ws_receiver: ewebsock::WsReceiver,
+    ws_receiver: WsReceiver,
     token: SecretString,
     session_id: Option<String>,
     last_sequence: usize,
@@ -42,21 +45,21 @@ impl Connection {
             "op": 2,
             "d": d,
         });
-        let (mut ws_sender, mut ws_receiver) = ewebsock::connect(url, Options::default()).unwrap();
+        let (mut ws_sender, mut ws_receiver) = connect(url, Options::default()).unwrap();
         {
             let mut a = ws_receiver.try_recv();
             while a.is_none() {
                 a = ws_receiver.try_recv();
             }
             match a.as_ref().unwrap() {
-                ewebsock::WsEvent::Opened => {}
+                WsEvent::Opened => {}
                 other => {
                     eprintln!("{:?}", other);
                 }
             }
         }
 
-        ws_sender.send(ewebsock::WsMessage::Text(identify.to_string()));
+        ws_sender.send(WsMessage::Text(identify.to_string()));
 
         // get heartbeat
         let heartbeat_interval;
@@ -66,9 +69,12 @@ impl Connection {
         }
 
         let (sender, receiver) = mpsc::channel();
+        let (temp_sender, temp_receiver) = mpsc::channel();
         std::thread::Builder::new()
             .name("Discord Websocket Keepalive".to_string())
-            .spawn(move || keepalive(heartbeat_interval, ws_sender, receiver))?;
+            .spawn(move || keepalive(heartbeat_interval, temp_receiver, receiver))?;
+        temp_sender.send(Arc::new(Mutex::new(ws_sender))).unwrap();
+        drop(temp_sender);
 
         let sequence;
         let ready;
@@ -104,7 +110,13 @@ impl Connection {
     }
 }
 
-fn keepalive(interval: usize, mut ws_sender: ewebsock::WsSender, channel: mpsc::Receiver<Status>) {
+fn keepalive(
+    interval: usize,
+    temp_receiver: mpsc::Receiver<Arc<Mutex<WsSender>>>,
+    channel: mpsc::Receiver<Status>,
+) {
+    let mut ws_sender = temp_receiver.recv().unwrap();
+    drop(temp_receiver);
     let mut tick_len = std::time::Duration::from_millis(interval as u64);
     let mut next_tick_at = std::time::Instant::now() + tick_len;
     let mut last_sequence = 0;
@@ -114,9 +126,10 @@ fn keepalive(interval: usize, mut ws_sender: ewebsock::WsSender, channel: mpsc::
 
         loop {
             match channel.try_recv() {
-                Ok(Status::SendMessage(val)) => {
-                    ws_sender.send(ewebsock::WsMessage::Text(val.to_string()))
-                }
+                Ok(Status::SendMessage(val)) => ws_sender
+                    .lock()
+                    .unwrap()
+                    .send(WsMessage::Text(val.to_string())),
                 Ok(Status::Sequence(seq)) => last_sequence = seq,
                 Ok(Status::ChangeInterval(interval)) => {
                     tick_len = std::time::Duration::from_millis(interval as u64);
@@ -138,7 +151,10 @@ fn keepalive(interval: usize, mut ws_sender: ewebsock::WsSender, channel: mpsc::
                 "d": last_sequence
             });
             println!("heartbeat");
-            ws_sender.send(ewebsock::WsMessage::Text(map.to_string()));
+            ws_sender
+                .lock()
+                .unwrap()
+                .send(WsMessage::Text(map.to_string()));
         }
     }
     println!("heartbeat_end");

@@ -93,7 +93,20 @@ impl DiscidiumData {
     }
 
     pub async fn from_token(token: String) -> Option<Self> {
-        Self::set_token(token);
-        Self::init().await
+        Self::set_token(token.clone());
+        let client = Client::from_user_token(token.into());
+        let (connection, ready) = match client.connect().await {
+            Ok(a) => a,
+            Err(err) => {
+                eprintln!("error connecting, Err: {:?}", err); // TODO if token doesnt work
+                return None;
+            }
+        };
+        let state = State::new(ready);
+        Some(Self {
+            client,
+            connection,
+            state,
+        })
     }
 }

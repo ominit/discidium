@@ -830,6 +830,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2ce361786137509f7fbf6326d1029b8fef6c959650ea0ba587fcf379e593e14"
 dependencies = [
+ "dioxus-cli-config",
  "dioxus-config-macro",
  "dioxus-core",
  "dioxus-core-macro",
@@ -1024,6 +1025,7 @@ dependencies = [
  "serde",
  "server_fn",
  "tracing",
+ "web-sys",
 ]
 
 [[package]]
@@ -1244,10 +1246,13 @@ dependencies = [
  "ewebsock",
  "flate2",
  "futures",
+ "js-sys",
  "keyring",
  "reqwest",
  "secrecy",
  "serde_json",
+ "wasm-bindgen",
+ "web-sys",
  "whoami",
 ]
 
