@@ -1,56 +1,76 @@
 mod components;
 
-use components::Login;
-use dioxus::prelude::*;
-use keyring::Entry;
-
 use crate::api::{client::Client, state::State, Connection};
 
-const FAVICON: Asset = asset!("/assets/favicon.ico");
-const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
+use keyring::Entry;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
+use yew::prelude::*;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"])]
+    async fn invoke(cmd: &str, args: JsValue) -> JsValue;
+}
 
 pub fn create_ui() {
     // DiscidiumData::delete_token();
-    dioxus::launch(App);
+    yew::Renderer::<App>::new().render();
 }
 
-async fn data_thread(mut reciever: UnboundedReceiver<Message>, mut state: Signal<Option<State>>) {
-    let mut data = DiscidiumData::init().await;
-    if data.is_some() {
-        state.set(Some(data.as_ref().unwrap().state.clone()));
-    }
-    loop {
-        use futures::StreamExt;
-        if let Some(message) = reciever.next().await {
-            match message {
-                Message::Login(new_data) => {
-                    let _ = data.insert(new_data);
-                    state.set(Some(data.as_ref().unwrap().state.clone()));
-                }
-            };
-        } else {
-            break;
-        }
-    }
-}
+// async fn data_thread(mut reciever: UnboundedReceiver<Message>, mut state: Signal<Option<State>>) {
+//     let mut data = DiscidiumData::init().await;
+//     if data.is_some() {
+//         state.set(Some(data.as_ref().unwrap().state.clone()));
+//     }
+//     loop {
+//         use futures::StreamExt;
+//         if let Some(message) = reciever.next().await {
+//             match message {
+//                 Message::Login(new_data) => {
+//                     let _ = data.insert(new_data);
+//                     state.set(Some(data.as_ref().unwrap().state.clone()));
+//                 }
+//             };
+//         } else {
+//             break;
+//         }
+//     }
+// }
 
 enum Message {
     Login(DiscidiumData),
 }
 
-#[component]
-fn App() -> Element {
-    let state = use_signal(|| None);
-    let sender =
-        use_coroutine(move |reciever: UnboundedReceiver<Message>| data_thread(reciever, state));
-    rsx! {
-        document::Link { rel: "icon", href: FAVICON }
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-        if state.read().is_none() {
-            Login { sender }
-        } else {
-            "logged in!"
-        }
+#[function_component(App)]
+fn app() -> Html {
+    // let state = Mutable::new(None);
+    // let state = use_signal(|| None);
+    // let sender =
+    //     use_coroutine(move |reciever: UnboundedReceiver<Message>| data_thread(reciever, state));
+    // rsx! {
+    //     document::Link { rel: "icon", href: FAVICON }
+    //     document::Link { rel: "stylesheet", href: MAIN_CSS }
+    //     if state.read().is_none() {
+    //         Login { sender }
+    //     } else {
+    //         "logged in!"
+    //     }
+    // }
+    html! {
+        <main class="container">
+            <h1>{"Welcome to Tauri + Yew"}</h1>
+
+            <div class="row">
+                <a href="https://tauri.app" target="_blank">
+                    <img src="public/tauri.svg" class="logo tauri" alt="Tauri logo"/>
+                </a>
+                <a href="https://yew.rs" target="_blank">
+                    <img src="public/yew.png" class="logo yew" alt="Yew logo"/>
+                </a>
+            </div>
+            <p>{"Click on the Tauri and Yew logos to learn more."}</p>
+        </main>
     }
 }
 

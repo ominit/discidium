@@ -3,21 +3,19 @@ use std::{
     sync::{mpsc, Arc, Mutex},
 };
 
-#[cfg(feature = "web")]
-use crate::api::websocket::{connect, Options, WsEvent, WsMessage, WsReceiver, WsSender};
 use anyhow::{Error, Result};
-#[cfg(feature = "desktop")]
 use ewebsock::{connect, Options, WsEvent, WsMessage, WsReceiver, WsSender};
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
+use wasm_bindgen_futures::spawn_local;
 
 use crate::api::model::{receive_json, Event, GatewayEvent};
 
 use super::model::{ReadyEvent, UserId};
 
 pub struct Connection {
-    keepalive_sender: mpsc::Sender<Status>,
-    ws_receiver: WsReceiver,
+    ws_sender: mpsc::Sender<Status>,
+    ws_receiver: mpsc::Receiver<GatewayEvent>,
     token: SecretString,
     session_id: Option<String>,
     last_sequence: usize,
@@ -45,40 +43,19 @@ impl Connection {
             "op": 2,
             "d": d,
         });
-        let (mut ws_sender, mut ws_receiver) = connect(url, Options::default()).unwrap();
-        {
-            let mut a = ws_receiver.try_recv();
-            while a.is_none() {
-                a = ws_receiver.try_recv();
-            }
-            match a.as_ref().unwrap() {
-                WsEvent::Opened => {}
-                other => {
-                    eprintln!("{:?}", other);
-                }
-            }
-        }
 
-        ws_sender.send(WsMessage::Text(identify.to_string()));
-
-        // get heartbeat
-        let heartbeat_interval;
-        match receive_json(&mut ws_receiver, GatewayEvent::decode)? {
-            GatewayEvent::Hello(interval) => heartbeat_interval = interval,
-            _ => return Err(Error::msg("expected hello during handshake")),
-        }
-
-        let (sender, receiver) = mpsc::channel();
-        let (temp_sender, temp_receiver) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("Discord Websocket Keepalive".to_string())
-            .spawn(move || keepalive(heartbeat_interval, temp_receiver, receiver))?;
-        temp_sender.send(Arc::new(Mutex::new(ws_sender))).unwrap();
-        drop(temp_sender);
+        let (ws_sender, to_ws_receiver) = mpsc::channel();
+        let (to_ws_sender, ws_receiver) = mpsc::channel();
+        spawn_local(keepalive(
+            url.to_string(),
+            identify.clone(),
+            to_ws_sender,
+            to_ws_receiver,
+        ));
 
         let sequence;
         let ready;
-        match receive_json(&mut ws_receiver, GatewayEvent::decode)? {
+        match ws_receiver.recv()? {
             GatewayEvent::Dispatch(seq, Event::Ready(event)) => {
                 sequence = seq;
                 ready = event;
@@ -96,7 +73,7 @@ impl Connection {
 
         Ok((
             Self {
-                keepalive_sender: sender.clone(),
+                ws_sender,
                 ws_receiver,
                 token,
                 session_id: Some(session_id),
@@ -110,13 +87,35 @@ impl Connection {
     }
 }
 
-fn keepalive(
-    interval: usize,
-    temp_receiver: mpsc::Receiver<Arc<Mutex<WsSender>>>,
-    channel: mpsc::Receiver<Status>,
+async fn keepalive(
+    url: String,
+    identify: Value,
+    sender: mpsc::Sender<GatewayEvent>,
+    receiver: mpsc::Receiver<Status>,
 ) {
-    let mut ws_sender = temp_receiver.recv().unwrap();
-    drop(temp_receiver);
+    let (mut ws_sender, mut ws_receiver) = connect(url, Options::default()).unwrap();
+    {
+        let mut a = ws_receiver.try_recv();
+        while a.is_none() {
+            a = ws_receiver.try_recv();
+        }
+        match a.as_ref().unwrap() {
+            WsEvent::Opened => {}
+            other => {
+                eprintln!("{:?}", other);
+            }
+        }
+    }
+
+    ws_sender.send(WsMessage::Text(identify.to_string()));
+
+    // get heartbeat
+    let interval;
+    match receive_json(&mut ws_receiver, GatewayEvent::decode).unwrap() {
+        GatewayEvent::Hello(heartbeat_interval) => interval = heartbeat_interval,
+        _ => panic!("expected hello during handshake"),
+    }
+
     let mut tick_len = std::time::Duration::from_millis(interval as u64);
     let mut next_tick_at = std::time::Instant::now() + tick_len;
     let mut last_sequence = 0;
@@ -125,11 +124,8 @@ fn keepalive(
         std::thread::sleep(std::time::Duration::from_millis(100));
 
         loop {
-            match channel.try_recv() {
-                Ok(Status::SendMessage(val)) => ws_sender
-                    .lock()
-                    .unwrap()
-                    .send(WsMessage::Text(val.to_string())),
+            match receiver.try_recv() {
+                Ok(Status::SendMessage(val)) => ws_sender.send(WsMessage::Text(val.to_string())),
                 Ok(Status::Sequence(seq)) => last_sequence = seq,
                 Ok(Status::ChangeInterval(interval)) => {
                     tick_len = std::time::Duration::from_millis(interval as u64);
@@ -142,6 +138,11 @@ fn keepalive(
                     break 'outer;
                 }
             }
+
+            match receive_json(&mut ws_receiver, GatewayEvent::decode) {
+                Ok(event) => sender.send(event).unwrap(),
+                Err(_) => {}
+            }
         }
 
         if std::time::Instant::now() >= next_tick_at {
@@ -151,10 +152,7 @@ fn keepalive(
                 "d": last_sequence
             });
             println!("heartbeat");
-            ws_sender
-                .lock()
-                .unwrap()
-                .send(WsMessage::Text(map.to_string()));
+            ws_sender.send(WsMessage::Text(map.to_string()));
         }
     }
     println!("heartbeat_end");

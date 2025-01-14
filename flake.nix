@@ -20,58 +20,42 @@
     ...
   }:
     flake-utils.lib.eachDefaultSystem (system: let
-      lib = nixpkgs.lib;
       pkgs = import nixpkgs {
         inherit system;
         overlays = [(import rust-overlay)];
       };
       craneLib = crane.mkLib pkgs;
 
-      rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-        extensions = [
-          "rust-src"
-          "rust-analyzer"
-          "clippy"
-        ];
-      };
-      rustBuildInputs =
-        [
-          pkgs.openssl
-          pkgs.libiconv
-          pkgs.pkg-config
-        ]
-        ++ lib.optionals pkgs.stdenv.isLinux [
-          pkgs.glib
-          pkgs.gtk3
-          pkgs.libsoup_3
-          pkgs.webkitgtk_4_1
-          pkgs.xdotool
-        ]
-        ++ lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [
-          IOKit
-          Carbon
-          WebKit
-          Security
-          Cocoa
-        ]);
+      nativeBuildInputs = with pkgs; [
+        pkg-config
+        gobject-introspection
+        cargo-tauri
+        rust-bin.stable.latest.default
+      ];
+
+      buildInputs = with pkgs; [
+        at-spi2-atk
+        atkmm
+        cairo
+        gdk-pixbuf
+        glib
+        gtk3
+        harfbuzz
+        librsvg
+        libsoup_3
+        pango
+        webkitgtk_4_1
+        openssl
+      ];
 
       discidium = craneLib.buildPackage {
         name = "discidium";
-        src = lib.cleanSourceWith {
-          src = self;
-          filter = path: type:
-            (lib.hasSuffix "\.html" path)
-            || (lib.hasInfix "/assets/" path)
-            || (craneLib.filterCargoSources path type);
-        };
-        buildInputs = rustBuildInputs;
-        nativeBuildInputs = [
-          rustToolchain
-        ];
+        src = craneLib.cleanCargoSource ./.;
+        inherit buildInputs nativeBuildInputs;
 
         postInstall = ''
           wrapProgram $out/bin/discidium \
-            --prefix LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath rustBuildInputs}"
+            --prefix LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}"
         '';
       };
     in {
@@ -81,19 +65,14 @@
       };
 
       devShell = pkgs.mkShell {
-        buildInputs = rustBuildInputs;
-        nativeBuildInputs = [
-          rustToolchain
-        ];
-        LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath rustBuildInputs;
+        inherit buildInputs nativeBuildInputs;
+        LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
         packages = with pkgs; [
+          trunk
           (rust-bin.stable.latest.default.override {
             targets = ["wasm32-unknown-unknown" "x86_64-unknown-linux-gnu"];
           })
         ];
-        shellHook = ''
-          cargo install dioxus-cli
-        '';
         # RUST_BACKTRACE = 1;
       };
     });

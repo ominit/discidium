@@ -2,11 +2,8 @@
 
 use std::io::Read;
 
-#[cfg(feature = "web")]
-use crate::api::websocket::{connect, Options, WsEvent, WsMessage, WsReceiver, WsSender};
 use anyhow::{Error, Result};
 use chrono::{DateTime, FixedOffset};
-#[cfg(feature = "desktop")]
 use ewebsock::{connect, Options, WsEvent, WsMessage, WsReceiver, WsSender};
 use serde_json::{Map, Value};
 

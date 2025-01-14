@@ -3,8 +3,8 @@ pub mod connection;
 pub mod model;
 mod ratelimit;
 pub mod state;
-#[cfg(feature = "web")]
-mod websocket;
+// #[cfg(feature = "web")]
+// mod websocket;
 
 pub use connection::Connection;
 pub use model::*;
