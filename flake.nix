@@ -24,13 +24,31 @@
         inherit system;
         overlays = [(import rust-overlay)];
       };
+      inherit (pkgs) lib;
       craneLib = crane.mkLib pkgs;
+
+      src = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [
+          (craneLib.fileset.commonCargoSources ./.)
+          # ./public/.
+          (lib.fileset.fileFilter (file: lib.any file.hasExt ["html" "css"]) ./.)
+        ];
+      };
+
+      cargoArtifacts = craneLib.buildDepsOnly {
+        inherit src;
+        CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
+        doCheck = false;
+      };
 
       nativeBuildInputs = with pkgs; [
         pkg-config
         gobject-introspection
         cargo-tauri
-        rust-bin.stable.latest.default
+        (rust-bin.stable.latest.default.override {
+          targets = ["wasm32-unknown-unknown"];
+        })
       ];
 
       buildInputs = with pkgs; [
@@ -46,16 +64,17 @@
         pango
         webkitgtk_4_1
         openssl
+        librsvg
       ];
 
       discidium = craneLib.buildPackage {
         name = "discidium";
-        src = craneLib.cleanCargoSource ./.;
-        inherit buildInputs nativeBuildInputs;
+        inherit buildInputs nativeBuildInputs cargoArtifacts src;
 
         postInstall = ''
-          wrapProgram $out/bin/discidium \
-            --prefix LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}"
+            # cargo tauri build
+          #   wrapProgram $out/bin/discidium \
+          #     --prefix LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}"
         '';
       };
     in {
@@ -66,12 +85,9 @@
 
       devShell = pkgs.mkShell {
         inherit buildInputs nativeBuildInputs;
-        LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
+        # LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
         packages = with pkgs; [
           trunk
-          (rust-bin.stable.latest.default.override {
-            targets = ["wasm32-unknown-unknown" "x86_64-unknown-linux-gnu"];
-          })
         ];
         # RUST_BACKTRACE = 1;
       };
