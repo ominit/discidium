@@ -19,6 +19,8 @@ jobs:
         - uses: DeterminateSystems/magic-nix-cache-action@v8
         - name: Build
           run: nix develop --command bash -c "trunk build --release --public-url $public_url --dist ./dist/"
+          env:
+            public_url: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
         - name: Deploy
           uses: JamesIves/github-pages-deploy-action@v4
           with:
