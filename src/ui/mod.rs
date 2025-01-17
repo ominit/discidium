@@ -1,7 +1,10 @@
 mod components;
 
+use std::sync::mpsc::{self, Receiver};
+
 use crate::api::{client::Client, state::State, Connection};
 
+use components::Login;
 use keyring::Entry;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -18,25 +21,25 @@ pub fn create_ui() {
     yew::Renderer::<App>::new().render();
 }
 
-// async fn data_thread(mut reciever: UnboundedReceiver<Message>, mut state: Signal<Option<State>>) {
-//     let mut data = DiscidiumData::init().await;
-//     if data.is_some() {
-//         state.set(Some(data.as_ref().unwrap().state.clone()));
-//     }
-//     loop {
-//         use futures::StreamExt;
-//         if let Some(message) = reciever.next().await {
-//             match message {
-//                 Message::Login(new_data) => {
-//                     let _ = data.insert(new_data);
-//                     state.set(Some(data.as_ref().unwrap().state.clone()));
-//                 }
-//             };
-//         } else {
-//             break;
-//         }
-//     }
-// }
+async fn data_thread(mut reciever: Receiver<Message>, mut state: UseStateHandle<Option<State>>) {
+    let mut data = DiscidiumData::init().await;
+    if data.is_some() {
+        state.set(Some(data.as_ref().unwrap().state.clone()));
+    }
+    loop {
+        use futures::StreamExt;
+        if let Ok(message) = reciever.recv() {
+            match message {
+                Message::Login(new_data) => {
+                    let _ = data.insert(new_data);
+                    state.set(Some(data.as_ref().unwrap().state.clone()));
+                }
+            };
+        } else {
+            break;
+        }
+    }
+}
 
 enum Message {
     Login(DiscidiumData),
@@ -45,9 +48,9 @@ enum Message {
 #[function_component(App)]
 fn app() -> Html {
     // let state = Mutable::new(None);
-    // let state = use_signal(|| None);
-    // let sender =
-    //     use_coroutine(move |reciever: UnboundedReceiver<Message>| data_thread(reciever, state));
+    let state = use_state(|| None);
+    let (sender, receiver) = mpsc::channel();
+    spawn_local(data_thread(receiver, state.clone()));
     // rsx! {
     //     document::Link { rel: "icon", href: FAVICON }
     //     document::Link { rel: "stylesheet", href: MAIN_CSS }
@@ -57,6 +60,11 @@ fn app() -> Html {
     //         "logged in!"
     //     }
     // }
+    if state.as_ref().is_none() {
+        return html! {
+            <Login  />
+        };
+    }
     html! {
         <main class="container">
             <h1>{"Welcome to Tauri + Yew"}</h1>
