@@ -6,6 +6,7 @@ use anyhow::{Error, Result};
 use chrono::{DateTime, FixedOffset};
 use ewebsock::{connect, Options, WsEvent, WsMessage, WsReceiver, WsSender};
 use serde_json::{Map, Value};
+use yew::platform::time::sleep;
 
 use super::CDN_URL;
 
@@ -1573,7 +1574,8 @@ pub enum Event {
 impl Event {
     pub fn decode(kind: &str, value: WrappedValue) -> Result<Self> {
         match kind {
-            "READY" => Ok(Event::Ready(value.to_decoder(ReadyEvent::decode)?)),
+            "READY" => Ok(Self::Ready(value.to_decoder(ReadyEvent::decode)?)),
+            // "SESSIONS_REPLACE" => Ok(Self::SessionsReplace(value.to_map()?.get(, ))),
             _ => {
                 println!("unknown event: {:?}", kind);
                 Ok(Event::Unknown(kind.to_string(), value))
@@ -1630,14 +1632,14 @@ impl GatewayEvent {
     }
 }
 
-pub fn receive_json<F, T>(ws_receiver: &mut WsReceiver, decode: F) -> Result<T>
+pub async fn receive_json<F, T>(ws_receiver: &mut WsReceiver, decode: F) -> Result<T>
 where
     F: FnOnce(WrappedMap) -> Result<T>,
 {
     let received = {
         let mut a = ws_receiver.try_recv();
         while a.is_none() {
-            std::thread::sleep(std::time::Duration::from_millis(300));
+            sleep(std::time::Duration::from_millis(300)).await;
             a = ws_receiver.try_recv();
         }
         a.unwrap()
@@ -1666,7 +1668,7 @@ where
             WsMessage::Pong(vec) => todo!(),
         },
         WsEvent::Error(_) => todo!(),
-        WsEvent::Closed => todo!(),
+        WsEvent::Closed => panic!("websocket closed"),
         // other => {
         //     println!("websocket message not text or binary: {:?}", other);
         //     Err(Error::msg("websocket message not text or binary"))

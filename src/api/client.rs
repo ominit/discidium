@@ -25,7 +25,7 @@ impl Client {
 
     pub async fn connect(&self) -> Result<(Connection, ReadyEvent)> {
         let url = self.get_gateway_url().await?;
-        Connection::new(&url, self.token.clone())
+        Connection::new(&url, self.token.clone()).await
     }
 
     /// pass None for json_body to make a request without a body
@@ -88,7 +88,12 @@ impl Client {
     }
 
     async fn get_gateway_url(&self) -> Result<String> {
-        let response = self.request(Method::GET, "/gateway", None).await?;
+        let response = self
+            .client
+            .request(Method::GET, format!("{}{}", ENDPOINT_URL, "/gateway"))
+            .header("Content-Type", "application/json")
+            .send()
+            .await?;
         Ok(response
             .json::<Value>()
             .await?

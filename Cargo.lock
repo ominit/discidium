@@ -856,11 +856,13 @@ dependencies = [
  "reqwest",
  "secrecy",
  "serde_json",
+ "time",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
  "whoami",
  "yew",
+ "yew-autoprops",
 ]
 
 [[package]]
@@ -4860,6 +4862,7 @@ checksum = "35e7868883861bd0e56d9ac6efcaaca0d6d5d82a2a7ec8209ff492c07cf37b21"
 dependencies = [
  "deranged",
  "itoa 1.0.14",
+ "js-sys",
  "num-conv",
  "powerfmt",
  "serde",
@@ -6068,6 +6071,17 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "yew-macro",
+]
+
+[[package]]
+name = "yew-autoprops"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58865a8f2470a6ad839274e05c9627170d32930f39a2348f8c425880a6131792"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.95",
 ]
 
 [[package]]
