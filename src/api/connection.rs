@@ -70,21 +70,18 @@ impl Connection {
 
         let sequence;
         let ready;
-        loop {
-            match ws_receiver.next().await.unwrap() {
-                GatewayEvent::Dispatch(seq, Event::Ready(event)) => {
-                    sequence = seq;
-                    ready = event;
-                    break;
-                }
-                GatewayEvent::InvalidateSession => {
-                    web_sys::console::log_1(&format!("invalidate session").into());
-                    todo!("invalidate session")
-                }
-                other => {
-                    web_sys::console::log_1(&format!("unknown response: {:?}", other).into());
-                    // panic!("unknown response: {:?}", other)
-                }
+        match ws_receiver.next().await.unwrap() {
+            GatewayEvent::Dispatch(seq, Event::Ready(event)) => {
+                sequence = seq;
+                ready = event;
+            }
+            GatewayEvent::InvalidateSession => {
+                web_sys::console::log_1(&format!("invalidate session").into());
+                todo!("invalidate session")
+            }
+            other => {
+                web_sys::console::log_1(&format!("unknown response: {:?}", other).into());
+                panic!("unknown response: {:?}", other)
             }
         }
         web_sys::console::log_1(&format!("a").into());
@@ -143,7 +140,9 @@ async fn keepalive(
         .await
         .unwrap()
     {
-        GatewayEvent::Hello(heartbeat_interval) => interval = heartbeat_interval,
+        GatewayEvent::Hello(heartbeat_interval) => {
+            interval = heartbeat_interval;
+        }
         _ => panic!("expected hello during handshake"),
     }
 
@@ -153,7 +152,9 @@ async fn keepalive(
     spawn_local(async move {
         loop {
             match receive_json(&mut ws_receiver, GatewayEvent::decode).await {
-                Ok(event) => sender.unbounded_send(event).unwrap(),
+                Ok(event) => {
+                    sender.unbounded_send(event).unwrap();
+                }
                 Err(_) => {}
             }
             sleep(std::time::Duration::from_millis(100)).await;

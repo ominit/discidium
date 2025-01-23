@@ -88,19 +88,21 @@ impl Client {
     }
 
     async fn get_gateway_url(&self) -> Result<String> {
-        let response = self
-            .client
-            .request(Method::GET, format!("{}{}", ENDPOINT_URL, "/gateway"))
-            .header("Content-Type", "application/json")
-            .send()
-            .await?;
-        Ok(response
-            .json::<Value>()
-            .await?
-            .get("url")
-            .expect("no url in response to get_gateway_url")
-            .as_str()
-            .expect("could not parse str")
-            .replace("\"", ""))
+        // let response = self
+        //     .client
+        //     .request(Method::GET, format!("{}{}", ENDPOINT_URL, "/gateway"))
+        //     .header("Content-Type", "application/json")
+        //     .send()
+        //     .await?;
+        // Ok(response
+        //     .json::<Value>()
+        //     .await?
+        //     .get("url")
+        //     .expect("no url in response to get_gateway_url")
+        //     .as_str()
+        //     .expect("could not parse str")
+        //     .replace("\"", ""))
+        // TODO it currents receives a cors cross origin refferer error
+        Ok("wss://gateway.discord.gg".to_string())
     }
 }
