@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <title>discidium</title>
+  <link rel="stylesheet" href="https://ominit.github.io/discidium/styles-9225bdcd827fc2c6.css" integrity="sha384&#x2D;y6&#x2F;y9eenDCyvsko3r5vggP0iFRJHBOsBxZPnacNfYvZy0KMwWGGzmmw1RHqPTcKI"/>
+  
+  <link rel="stylesheet" href="https://ominit.github.io/discidium/tailwind-a3557984c4828eac.css" integrity="sha384&#x2D;RV&#x2B;bEiIJU9om7LS&#x2B;zvHxDB&#x2F;ijPLtGVyIn&#x2B;7KHeTrADuiuTNRTtL4bY&#x2F;bueeGeNt4"/>
+<link rel="modulepreload" href="https://ominit.github.io/discidium/discidium-ce0f138dea2fd8c9.js" crossorigin=anonymous integrity="sha384-F8eCiTplDPJcFsAhxnysyhdL0EsXIO2UsJ927D43BQZ71Coe2K7Ap76rBVj+ZNIW"><link rel="preload" href="https://ominit.github.io/discidium/discidium-ce0f138dea2fd8c9_bg.wasm" crossorigin=anonymous integrity="sha384-Lfc1E0ZcqQQI6dAZh5G0s8UI+0dTTcHZlosMpfXX8avnCuUEySDPJnQ4L54JNQW7" as="fetch" type="application/wasm"></head>
+
+<body>
+<script type="module" nonce="CRL4ATuvKo8tvrbshC1geA==">
+import init, * as bindings from 'https://ominit.github.io/discidium/discidium-ce0f138dea2fd8c9.js';
+const wasm = await init({ module_or_path: 'https://ominit.github.io/discidium/discidium-ce0f138dea2fd8c9_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script></body>
+
+</html>
