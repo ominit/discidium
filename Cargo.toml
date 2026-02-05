@@ -33,7 +33,7 @@ web-sys = { version = "0.3.77", features = [
 whoami = "1.5.2"
 ewebsock = "0.8.0"
 yew-autoprops = "0.4.1"
-time = { version = "0.3.37", features = ["wasm-bindgen", "std"] }
+time = { version = "0.3.47", features = ["wasm-bindgen", "std"] }
 
 [workspace]
 members = ["src-tauri"]
